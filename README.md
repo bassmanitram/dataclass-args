@@ -388,7 +388,7 @@ $ python deploy.py --help
 
 ### File-Loadable Parameters
 
-Load string parameters from files using the `@filename` syntax:
+Load string parameters from files using the `@filename` syntax. Supports home directory expansion with `~`:
 
 ```python
 from dataclass_args import cli_file_loadable
@@ -406,18 +406,28 @@ config = build_config(AppConfig)
 # Use literal values
 $ python app.py --system-prompt "You are a coding assistant"
 
-# Load from files
-$ python app.py --system-prompt "@prompts/coding_assistant.txt" --welcome-message "@messages/welcome.txt"
+# Load from files (absolute paths)
+$ python app.py --system-prompt "@/etc/prompts/assistant.txt"
+
+# Load from home directory
+$ python app.py --system-prompt "@~/prompts/assistant.txt"
+
+# Load from another user's home
+$ python app.py --system-prompt "@~alice/shared/prompt.txt"
+
+# Load from relative paths
+$ python app.py --welcome-message "@messages/welcome.txt"
 
 # Mix literal and file-loaded values
-$ python app.py --name "MyApp" --system-prompt "@prompts/assistant.txt"
+$ python app.py --name "MyApp" --system-prompt "@~/prompts/assistant.txt"
 ```
 
-### Configuration File Merging
+**Path Expansion:**
+- `@~/file.txt` → Expands to user's home directory (e.g., `/home/user/file.txt`)
+- `@~username/file.txt` → Expands to specified user's home directory
+- `@/absolute/path` → Used as-is
+- `@relative/path` → Relative to current working directory
 
-Combine base configuration files with CLI overrides:
-
-```yaml
 # config.yaml
 name: "DefaultApp"
 count: 100

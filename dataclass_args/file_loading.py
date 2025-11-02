@@ -29,17 +29,26 @@ def load_file_content(file_path: str) -> str:
     """
     Load content from a file as UTF-8 encoded text.
 
+    Supports ~ expansion for user home directory paths.
+
     Args:
-        file_path: Path to the file to load
+        file_path: Path to the file to load (supports ~ for home directory)
 
     Returns:
         File content as string
 
     Raises:
         FileLoadingError: If file cannot be read or decoded
+
+    Examples:
+        >>> load_file_content("~/config.txt")  # Expands to /home/user/config.txt
+        >>> load_file_content("~alice/file.txt")  # Expands to /home/alice/file.txt
+        >>> load_file_content("/absolute/path.txt")  # Unchanged
+        >>> load_file_content("relative/path.txt")  # Unchanged
     """
     try:
-        path_obj = Path(file_path)
+        # Expand ~ to user's home directory
+        path_obj = Path(file_path).expanduser()
 
         # Check if file exists
         if not path_obj.exists():

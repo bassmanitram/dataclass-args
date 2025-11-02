@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.0.1] - 2025-11-02
+
+### Added
+- **Home directory expansion** for file-loadable parameters
+  - `@~/file.txt` now expands to user's home directory
+  - `@~username/file.txt` expands to specified user's home directory
+  - Supports all path types: `@~/path`, `@~user/path`, `@/absolute`, `@relative`
+
+### Changed
+- Updated `load_file_content()` to use `Path.expanduser()` for tilde expansion
+- Enhanced documentation with path expansion examples
+
+### Tests
+- Added 4 new tests for tilde expansion functionality
+- All 234 tests passing with 94.35% coverage
+
+
 ## [1.0.0] - 2025-01-31
 
 ### 🎉 First Stable Release
@@ -74,6 +91,7 @@ No migration needed - this is the initial stable release.
 - Comprehensive test suite
 - Documentation and examples
 
-[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.0.1
 [1.0.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.0.0
 [0.1.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v0.1.0

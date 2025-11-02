@@ -358,5 +358,95 @@ class TestFileLoadableEdgeCases:
             os.unlink(temp_path)
 
 
+class TestHomeDirectoryExpansion:
+    """Test home directory expansion in file paths."""
+
+    def test_tilde_expansion_home(self):
+        """Test that ~ is expanded to user's home directory."""
+        # Create a temporary file in user's home directory
+        home = Path.home()
+        test_file = home / ".dataclass_args_test_temp.txt"
+        test_content = "Home directory test content"
+
+        try:
+            test_file.write_text(test_content, encoding="utf-8")
+
+            # Test with ~ prefix
+            config = build_config_from_cli(
+                FileLoadableConfig,
+                [
+                    "--welcome-message",
+                    "Welcome",
+                    "--name",
+                    "HomeTest",
+                    "--system-prompt",
+                    "@~/.dataclass_args_test_temp.txt",
+                ],
+            )
+
+            assert config.system_prompt == test_content
+
+        finally:
+            # Clean up
+            if test_file.exists():
+                test_file.unlink()
+
+    def test_tilde_expansion_explicit_path(self):
+        """Test that ~/explicit/path works correctly."""
+        # Create nested directory structure in home
+        home = Path.home()
+        test_dir = home / ".dataclass_args_test_dir"
+        test_dir.mkdir(exist_ok=True)
+        test_file = test_dir / "test.txt"
+        test_content = "Nested home directory test"
+
+        try:
+            test_file.write_text(test_content, encoding="utf-8")
+
+            # Test with explicit path from ~
+            config = build_config_from_cli(
+                FileLoadableConfig,
+                [
+                    "--welcome-message",
+                    "Welcome",
+                    "--name",
+                    "NestedHomeTest",
+                    "--system-prompt",
+                    "@~/.dataclass_args_test_dir/test.txt",
+                ],
+            )
+
+            assert config.system_prompt == test_content
+
+        finally:
+            # Clean up
+            if test_file.exists():
+                test_file.unlink()
+            if test_dir.exists():
+                test_dir.rmdir()
+
+    def test_load_file_content_tilde(self):
+        """Test load_file_content directly with ~ expansion."""
+        home = Path.home()
+        test_file = home / ".dataclass_args_test_direct.txt"
+        test_content = "Direct tilde test"
+
+        try:
+            test_file.write_text(test_content, encoding="utf-8")
+
+            # Load using ~ syntax
+            content = load_file_content("~/.dataclass_args_test_direct.txt")
+            assert content == test_content
+
+        finally:
+            if test_file.exists():
+                test_file.unlink()
+
+    def test_tilde_nonexistent_file(self):
+        """Test error handling for non-existent file with ~ path."""
+        with pytest.raises(FileLoadingError, match="File not found"):
+            load_file_content("~/nonexistent_file_12345.txt")
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

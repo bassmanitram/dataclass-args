@@ -169,27 +169,48 @@ def cli_file_loadable(**kwargs) -> Any:
     When a CLI argument value starts with '@', the remaining part is treated as a file path.
     The file is read as UTF-8 encoded text and used as the field value.
 
+    Home directory expansion is supported: '~' expands to the user's home directory.
+
     Args:
         **kwargs: Additional field parameters (default, default_factory, etc.)
 
     Returns:
         Field object with file-loadable metadata
 
-    Example:
-        @dataclass
-        class Config:
-            message: str = cli_file_loadable()
-            system_prompt: str = cli_file_loadable(default="You are a helpful assistant.")
+    Examples:
+        Basic usage:
 
-            # For combining with help text, use field() directly:
-            enhanced: str = field(
-                default="",
-                metadata={'cli_help': "Message content", 'cli_file_loadable': True}
-            )
+        >>> @dataclass
+        ... class Config:
+        ...     message: str = cli_file_loadable()
+        ...     system_prompt: str = cli_file_loadable(default="You are a helpful assistant.")
 
-        # Usage:
-        # --message "Hello world"           # Uses literal value
-        # --message "@/path/to/file.txt"    # Reads file content
+        This generates fields with metadata:
+            message:
+                metadata={'cli_file_loadable': True}
+            system_prompt:
+                default="You are a helpful assistant."
+                metadata={'cli_file_loadable': True}
+
+        CLI usage:
+            # Literal value
+            --message "Hello, World!"
+
+            # Load from absolute path
+            --message "@/path/to/file.txt"
+
+            # Load from home directory
+            --message "@~/messages/welcome.txt"
+
+            # Load from user's home
+            --message "@~alice/shared/message.txt"
+
+            # Load from relative path
+            --message "@data/message.txt"
+
+    Note:
+        Only fields marked with cli_file_loadable() will process '@' as a file loading trigger.
+        Regular string fields will treat '@' as a literal character.
     """
     field_kwargs = kwargs.copy()
     metadata = field_kwargs.pop("metadata", {})
