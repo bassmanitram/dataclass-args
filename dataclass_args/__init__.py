@@ -65,7 +65,7 @@ from .exceptions import ConfigBuilderError, ConfigurationError, FileLoadingError
 from .file_loading import is_file_loadable_value, load_file_content
 from .utils import load_structured_file
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     # Main API
