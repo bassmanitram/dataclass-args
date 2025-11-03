@@ -9,7 +9,7 @@ import argparse
 import json
 import sys
 from dataclasses import MISSING, fields, is_dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 # Import typing utilities with Python 3.8+ compatibility
 try:
@@ -46,45 +46,28 @@ class GenericConfigBuilder:
     - Object parameter file loading with property overrides
     - File-loadable string parameters via '@' prefix
     - Hierarchical merging of configuration sources
-    - Field filtering via annotations or custom filters
+    - Field filtering via cli_exclude() annotations
     """
 
     def __init__(
         self,
         config_class: Type,
-        exclude_fields: Optional[Set[str]] = None,
-        include_fields: Optional[Set[str]] = None,
-        field_filter: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
-        use_annotations: bool = True,
     ):
         """
         Initialize builder for a specific dataclass type.
 
         Args:
             config_class: Dataclass type to build configurations for
-            exclude_fields: Set of field names to exclude from CLI
-            include_fields: Set of field names to include in CLI (exclusive with exclude_fields)
-            field_filter: Custom function to determine field inclusion
-            use_annotations: Whether to respect cli_exclude() annotations (default: True)
 
         Raises:
-            ConfigBuilderError: If config_class is not a dataclass or conflicting filters provided
+            ConfigBuilderError: If config_class is not a dataclass
         """
         if not is_dataclass(config_class):
             raise ConfigBuilderError(
                 f"config_class must be a dataclass, got {config_class}"
             )
 
-        if exclude_fields and include_fields:
-            raise ConfigBuilderError(
-                "Cannot specify both exclude_fields and include_fields"
-            )
-
         self.config_class = config_class
-        self.exclude_fields = exclude_fields or set()
-        self.include_fields = include_fields
-        self.field_filter = field_filter
-        self.use_annotations = use_annotations
         self._config_fields = self._analyze_config_fields()
 
     def _should_include_field(
@@ -92,20 +75,8 @@ class GenericConfigBuilder:
     ) -> bool:
         """Determine if a field should be included in CLI arguments."""
 
-        # Apply annotation filter first if enabled
-        if self.use_annotations and is_cli_excluded(field_info):
-            return False
-
-        # Apply custom filter if provided
-        if self.field_filter:
-            return self.field_filter(field_name, field_info)
-
-        # Apply include_fields filter (exclusive)
-        if self.include_fields is not None:
-            return field_name in self.include_fields
-
-        # Apply exclude_fields filter
-        if field_name in self.exclude_fields:
+        # Apply annotation filter
+        if is_cli_excluded(field_info):
             return False
 
         # Default: include all fields
@@ -587,10 +558,6 @@ def build_config_from_cli(
     config_class: Type,
     args: Optional[List[str]] = None,
     base_config_name: str = "config",
-    exclude_fields: Optional[Set[str]] = None,
-    include_fields: Optional[Set[str]] = None,
-    field_filter: Optional[Callable[[str, Dict[str, Any]], bool]] = None,
-    use_annotations: bool = True,
 ) -> Any:
     """
     Convenience function to build any dataclass from CLI arguments.
@@ -599,10 +566,6 @@ def build_config_from_cli(
         config_class: Dataclass type to build
         args: Command-line arguments (defaults to sys.argv[1:])
         base_config_name: Name for base config file argument
-        exclude_fields: Set of field names to exclude from CLI
-        include_fields: Set of field names to include in CLI
-        field_filter: Custom function to determine field inclusion
-        use_annotations: Whether to respect cli_exclude() annotations (default: True)
 
     Returns:
         Instance of config_class built from CLI arguments
@@ -629,13 +592,7 @@ def build_config_from_cli(
     if args is None:
         args = sys.argv[1:]
 
-    builder = GenericConfigBuilder(
-        config_class,
-        exclude_fields=exclude_fields,
-        include_fields=include_fields,
-        field_filter=field_filter,
-        use_annotations=use_annotations,
-    )
+    builder = GenericConfigBuilder(config_class)
     parser = argparse.ArgumentParser(
         description=f"Build {config_class.__name__} from CLI"
     )

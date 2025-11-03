@@ -28,25 +28,6 @@ except ImportError:
         HAS_TOML = False
 
 
-def exclude_internal_fields(field_name: str, field_info: Dict[str, Any]) -> bool:
-    """
-    Filter function that excludes internal fields (starting with underscore).
-
-    Args:
-        field_name: Name of the field
-        field_info: Field information dictionary (unused)
-
-    Returns:
-        True if field should be included (doesn't start with underscore)
-
-    Example:
-        from dataclass_args import GenericConfigBuilder
-
-        builder = GenericConfigBuilder(MyConfig, field_filter=exclude_internal_fields)
-    """
-    return not field_name.startswith("_")
-
-
 def load_structured_file(file_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Load structured data from JSON, YAML, or TOML file.

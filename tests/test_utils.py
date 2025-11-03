@@ -10,34 +10,7 @@ from unittest.mock import mock_open, patch
 
 import pytest
 
-from dataclass_args.utils import exclude_internal_fields, load_structured_file
-
-
-class TestExcludeInternalFields:
-    """Tests for exclude_internal_fields filter function."""
-
-    def test_excludes_underscore_fields(self):
-        """Should exclude fields starting with underscore."""
-        assert not exclude_internal_fields("_private", {})
-        assert not exclude_internal_fields("_internal_value", {})
-
-    def test_includes_public_fields(self):
-        """Should include fields not starting with underscore."""
-        assert exclude_internal_fields("public", {})
-        assert exclude_internal_fields("name", {})
-        assert exclude_internal_fields("config_value", {})
-
-    def test_includes_dunder_fields(self):
-        """Should include dunder methods (edge case)."""
-        # Note: In practice, dataclass fields shouldn't have dunder names,
-        # but the filter should handle them
-        assert not exclude_internal_fields("__init__", {})
-
-    def test_field_info_ignored(self):
-        """Field info parameter should not affect result."""
-        field_info = {"type": str, "default": "test"}
-        assert exclude_internal_fields("public", field_info)
-        assert not exclude_internal_fields("_private", field_info)
+from dataclass_args.utils import load_structured_file
 
 
 class TestLoadStructuredFile:

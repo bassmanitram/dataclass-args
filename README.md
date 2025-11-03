@@ -534,9 +534,6 @@ Generate CLI with additional options.
 config = build_config_from_cli(
     MyDataclass,
     args=['--name', 'test'],
-    exclude_fields={'internal_field'},
-    use_annotations=True
-)
 ```
 
 ### Annotations

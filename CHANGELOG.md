@@ -6,6 +6,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.1.0] - 2024-11-02
+
+### Removed
+- Removed unused `exclude_fields`, `include_fields`, `field_filter`, and `use_annotations` parameters from `GenericConfigBuilder.__init__()` and `build_config_from_cli()`
+  - These were rarely-used internal parameters intended for edge cases
+  - The annotation-based approach using `cli_exclude()` has always been the recommended and documented method
+  - No known usage in production code based on usage analysis
+  - `use_annotations` parameter allowed runtime override of annotations, creating confusing dual-control mechanism
+- Removed `exclude_internal_fields()` utility function
+  - Was an example function for the deprecated `field_filter` parameter
+  - No usage in production code
+  - Its use case is now handled by `cli_exclude()` annotation
+
+### Changed
+- Simplified `GenericConfigBuilder` API from 5 parameters to 1 (`config_class` only)
+- Simplified `build_config_from_cli` by removing `use_annotations` parameter
+- Field filtering now exclusively uses `cli_exclude()` annotations - no runtime overrides
+- Reduced API surface area by 80% for improved clarity
+
+### Migration (if needed)
+If you were using these parameters, switch to `cli_exclude()` annotations:
+
+**Before:**
+```python
+builder = GenericConfigBuilder(MyConfig, exclude_fields={'secret'})
+# or
+builder = GenericConfigBuilder(MyConfig, use_annotations=False)
+# or
+builder = GenericConfigBuilder(MyConfig, field_filter=exclude_internal_fields)
+```
+
+**After:**
+```python
+@dataclass
+class MyConfig:
+    public: str
+    secret: str = cli_exclude(default="")
+
+builder = GenericConfigBuilder(MyConfig)
+```
+
+For third-party dataclasses, use inheritance:
+```python
+@dataclass
+class MyConfig(ThirdPartyConfig):
+    unwanted_field: str = cli_exclude()  # Override to exclude
+```
+
+If you need different field visibility for different contexts, use separate dataclasses:
+```python
+@dataclass
+class PublicConfig:
+    name: str
+    value: str
+
+@dataclass
+class DebugConfig(PublicConfig):
+    secret: str  # Include in debug version only
+```
+
+### Quality
+- All 224 tests passing (removed 4 tests for deprecated function)
+- Test coverage: 94.29%
+- Removed 6 obsolete tests for deprecated parameters
+
+---
+
 ## [1.0.1] - 2025-11-02
 
 ### Added
@@ -91,7 +158,8 @@ No migration needed - this is the initial stable release.
 - Comprehensive test suite
 - Documentation and examples
 
-[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.1.0
 [1.0.1]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.0.1
 [1.0.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.0.0
 [0.1.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v0.1.0

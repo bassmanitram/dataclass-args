@@ -374,26 +374,6 @@ def get_cli_help(field_info: Dict[str, Any]) -> str:
     return ""
 
 
-def annotation_filter(field_name: str, field_info: Dict[str, Any]) -> bool:
-    """
-    Filter function that respects field annotations.
-
-    This filter function excludes fields marked with cli_exclude() and
-    can be used with GenericConfigBuilder.
-
-    Args:
-        field_name: Name of the field
-        field_info: Field information dictionary
-
-    Returns:
-        True if field should be included in CLI
-
-    Example:
-        builder = GenericConfigBuilder(MyConfig, field_filter=annotation_filter)
-    """
-    return not is_cli_excluded(field_info)
-
-
 def cli_positional(
     nargs: Optional[Any] = None, metavar: Optional[str] = None, **kwargs
 ) -> Any:

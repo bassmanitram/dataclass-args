@@ -63,7 +63,7 @@ from .annotations import (
 from .builder import GenericConfigBuilder, build_config, build_config_from_cli
 from .exceptions import ConfigBuilderError, ConfigurationError, FileLoadingError
 from .file_loading import is_file_loadable_value, load_file_content
-from .utils import exclude_internal_fields, load_structured_file
+from .utils import load_structured_file
 
 __version__ = "1.0.0"
 
@@ -93,7 +93,6 @@ __all__ = [
     "load_file_content",
     "is_file_loadable_value",
     # Utilities
-    "exclude_internal_fields",
     "load_structured_file",
     # Exceptions
     "ConfigBuilderError",

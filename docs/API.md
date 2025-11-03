@@ -60,10 +60,6 @@ Advanced function with additional configuration options. Provides full control o
 - `args` (Optional[List[str]]): Command-line arguments to parse
 - `**options`: Additional configuration options:
   - `base_config_name` (str): Name for base config file argument (default: `'config'`)
-  - `exclude_fields` (Set[str]): Field names to exclude from CLI
-  - `include_fields` (Set[str]): Field names to include in CLI (exclusive with exclude_fields)
-  - `field_filter` (Callable): Custom function to determine field inclusion
-  - `use_annotations` (bool): Whether to use annotation-based filtering (default: `True`)
   - `prog` (str): Program name for help text
   - `description` (str): Program description for help text
   - `epilog` (str): Text to display after help
@@ -78,7 +74,6 @@ from dataclass_args import build_config_from_cli
 config = build_config_from_cli(
     Config,
     args=['--name', 'test'],
-    exclude_fields={'internal_field'},
     prog='myapp',
     description='My Application CLI',
 )
@@ -389,10 +384,6 @@ Supports:
 
 **Constructor Parameters:**
 - `config_class` (Type[dataclass]): Dataclass type to build configurations for
-- `exclude_fields` (Optional[Set[str]]): Field names to exclude from CLI
-- `include_fields` (Optional[Set[str]]): Field names to include in CLI (exclusive with exclude_fields)
-- `field_filter` (Optional[Callable]): Custom function to determine field inclusion
-- `use_annotations` (bool): Whether to respect cli_exclude() annotations (default: `True`)
 
 **Methods:**
 
@@ -427,7 +418,7 @@ class Config:
     port: int = 8000
 
 # Create builder
-builder = GenericConfigBuilder(Config, exclude_fields={'internal'})
+builder = GenericConfigBuilder(Config)
 
 # Create parser and add arguments
 parser = argparse.ArgumentParser()
@@ -551,27 +542,6 @@ Exception raised when file loading fails.
 ---
 
 ## Utility Functions
-
-### `exclude_internal_fields(field_name, field_info)`
-
-Built-in filter function that excludes internal fields (starting with underscore).
-
-**Parameters:**
-- `field_name` (str): Name of the field
-- `field_info` (Dict[str, Any]): Field information dictionary
-
-**Returns:**
-- `bool`: False if field starts with `_`, True otherwise
-
-**Example:**
-```python
-config = build_config_from_cli(
-    Config,
-    field_filter=exclude_internal_fields
-)
-```
-
----
 
 ### `load_structured_file(file_path)`
 

@@ -283,21 +283,6 @@ class TestBuilderErrorHandling:
         with pytest.raises(ConfigBuilderError, match="must be a dataclass"):
             GenericConfigBuilder(NotADataclass)
 
-    def test_conflicting_filters_error(self):
-        """Should raise ConfigBuilderError for conflicting include/exclude filters."""
-
-        @dataclass
-        class TestConfig:
-            name: str
-
-        with pytest.raises(
-            ConfigBuilderError,
-            match="Cannot specify both exclude_fields and include_fields",
-        ):
-            GenericConfigBuilder(
-                TestConfig, exclude_fields={"name"}, include_fields={"name"}
-            )
-
     def test_base_config_loading_error(self):
         """Should raise ConfigurationError for invalid base config."""
 
@@ -331,59 +316,12 @@ class TestBuilderFieldFiltering:
         excluded_field: str = "excluded"
         included_field: str = "included"
 
-    def test_exclude_fields_parameter(self):
-        """Should exclude specified fields from CLI."""
-        builder = GenericConfigBuilder(
-            self.FilterableConfig, exclude_fields={"excluded_field"}
-        )
-
-        # excluded_field should not be in config fields
-        assert "excluded_field" not in builder._config_fields
-        assert "public_field" in builder._config_fields
-        assert "included_field" in builder._config_fields
-
-    def test_include_fields_parameter(self):
-        """Should only include specified fields in CLI."""
-        builder = GenericConfigBuilder(
-            self.FilterableConfig, include_fields={"included_field"}
-        )
-
-        # Only included_field should be in config fields (excluding cli_exclude)
-        assert "included_field" in builder._config_fields
-        assert "public_field" not in builder._config_fields
-        assert "excluded_field" not in builder._config_fields
-
-    def test_custom_field_filter(self):
-        """Should apply custom field filter function."""
-
-        def only_long_names(field_name: str, field_info) -> bool:
-            return len(field_name) > 10
-
-        builder = GenericConfigBuilder(
-            self.FilterableConfig, field_filter=only_long_names, use_annotations=False
-        )
-
-        # Only fields with names longer than 10 chars
-        # public_field = 12 chars, _internal_field = 15 chars
-        # excluded_field = 14 chars, included_field = 14 chars
-        assert "public_field" in builder._config_fields
-        assert "_internal_field" in builder._config_fields
-        assert "excluded_field" in builder._config_fields
-        assert "included_field" in builder._config_fields
-
     def test_annotations_respected_by_default(self):
         """Should respect cli_exclude annotations by default."""
         builder = GenericConfigBuilder(self.FilterableConfig)
 
         # _internal_field has cli_exclude annotation
         assert "_internal_field" not in builder._config_fields
-
-    def test_annotations_can_be_disabled(self):
-        """Should ignore annotations when use_annotations=False."""
-        builder = GenericConfigBuilder(self.FilterableConfig, use_annotations=False)
-
-        # With annotations disabled, _internal_field should be included
-        assert "_internal_field" in builder._config_fields
 
 
 class TestBuilderConvenienceFunctions:
@@ -411,21 +349,6 @@ class TestBuilderConvenienceFunctions:
 
         assert config.name == "explicit"
         assert config.count == 3
-
-    def test_build_config_from_cli_all_parameters(self):
-        """build_config_from_cli should accept all configuration parameters."""
-        config = build_config_from_cli(
-            self.SimpleConfig,
-            args=["--name", "test"],
-            base_config_name="config",
-            exclude_fields=set(),
-            include_fields=None,
-            field_filter=None,
-            use_annotations=True,
-        )
-
-        assert config.name == "test"
-        assert config.count == 10  # default value
 
 
 class TestBuilderComplexScenarios:
