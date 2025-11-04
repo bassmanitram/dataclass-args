@@ -6,7 +6,7 @@ Generate command-line interfaces from Python dataclasses.
 [![Code Quality](https://github.com/bassmanitram/dataclass-args/actions/workflows/lint.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/lint.yml)
 [![Examples](https://github.com/bassmanitram/dataclass-args/actions/workflows/examples.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/examples.yml)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyPI version](https://badge.fury.io/py/dataclass-args.svg)](https://badge.fury.io/py/dataclass-args)
+[![PyPI version](https://img.shields.io/pypi/v/dataclass-args.svg)](https://pypi.org/project/dataclass-args/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
