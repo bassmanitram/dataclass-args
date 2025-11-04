@@ -38,7 +38,7 @@ jobs:
       run: |
         cd examples
         python basic_example.py --name "StatusTest" --count 1
-        python advanced_example.py --name "StatusTest" --debug false
+        python advanced_example.py --name "StatusTest" --no-debug
 
     - name: Package health check
       run: |
