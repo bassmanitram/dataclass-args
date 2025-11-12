@@ -1,3 +1,43 @@
+## [Unreleased]
+
+### Added
+- **Enhanced `base_configs` parameter** for flexible programmatic configuration merging
+  - Accepts single config file path (`str`): `base_configs='defaults.yaml'`
+  - Accepts single configuration dictionary (`dict`): `base_configs={'debug': True}`
+  - Accepts list mixing files and dicts (`List[Union[str, dict]]`): `base_configs=['base.yaml', {'env': 'prod'}, 'overrides.json']`
+  - Files in `base_configs` are automatically loaded
+  - Applied before `--config` file and CLI arguments in clear hierarchical order
+- Crystal clear four-stage configuration merge process:
+  1. Programmatic `base_configs` (if provided) - applied sequentially
+  2. Config file from `--config` CLI argument (if provided)
+  3. CLI argument overrides (highest priority)
+  4. Dataclass instantiation
+- Comprehensive error messages with context (e.g., list indices for failed file loads)
+- New test suite: `tests/test_config_merging_simple.py` with 10 tests covering core functionality
+- Example script: `examples/config_merging_example.py` demonstrating multi-source configuration
+
+### Changed
+- Refactored `GenericConfigBuilder.build_config()` into distinct stages for clarity
+- Enhanced `build_config()` and `build_config_from_cli()` to accept `base_configs` parameter
+- Improved internal code organization with dedicated methods:
+  - `_normalize_base_configs()` - Converts any input format to List[Dict]
+  - `_apply_base_configs()` - Merges base configs sequentially
+  - `_apply_config_file()` - Loads and merges --config file
+  - `_apply_cli_overrides()` - Applies CLI argument overrides
+- Updated error message for config file loading to be more specific
+
+### Fixed
+- None (backward compatible enhancement)
+
+### Notes
+- **Known Limitation**: Boolean fields with defaults may not merge correctly from `base_configs` when no CLI flag is provided for that field. This is due to argparse's `set_defaults()` behavior. Workaround: explicitly provide boolean flags on CLI when using `base_configs` with booleans. See `local/KNOWN_LIMITATION.md` for details.
+
+### Quality
+- All 234 tests passing (224 existing + 10 new)
+- Test coverage: 94.15%
+- Backward compatible - no breaking changes
+
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

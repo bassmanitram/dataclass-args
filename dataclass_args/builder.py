@@ -34,6 +34,9 @@ from .exceptions import ConfigBuilderError, ConfigurationError
 from .file_loading import process_file_loadable_value
 from .utils import load_structured_file
 
+# Type alias for base_configs parameter
+BaseConfigInput = Union[str, Dict[str, Any], List[Union[str, Dict[str, Any]]]]
+
 
 class GenericConfigBuilder:
     """
@@ -414,37 +417,63 @@ class GenericConfigBuilder:
             return str
 
     def build_config(
-        self, args: argparse.Namespace, base_config_name: str = "config"
+        self,
+        args: argparse.Namespace,
+        base_config_name: str = "config",
+        base_configs: Optional[BaseConfigInput] = None,
     ) -> Any:
         """
-        Build dataclass instance from parsed CLI arguments.
+        Build dataclass instance from parsed CLI arguments with hierarchical config merging.
+
+        Configuration sources are merged in the following order (later sources override earlier):
+        1. Programmatic base_configs (if provided) - files loaded and applied in order
+        2. Config file from --config argument (if provided)
+        3. CLI argument overrides
 
         Args:
-            args: Parsed CLI arguments
-            base_config_name: Name of base config argument
+            args: Parsed CLI arguments from argparse
+            base_config_name: Name of the base config file argument (default: "config")
+            base_configs: Optional base configuration(s) to apply before --config file.
+                         Can be:
+                         - str: Path to a single config file
+                         - dict: A single configuration dictionary
+                         - List[Union[str, dict]]: Multiple configs (files and/or dicts) applied in order
 
         Returns:
             Instance of the configured dataclass type
 
         Raises:
-            ConfigurationError: If configuration is invalid
+            ConfigurationError: If configuration is invalid or files cannot be loaded
+
+        Example:
+            # Single file path
+            config = builder.build_config(args, base_configs='defaults.yaml')
+            
+            # Single dict
+            config = builder.build_config(args, base_configs={'debug': True})
+            
+            # Mixed list
+            config = builder.build_config(
+                args,
+                base_configs=[
+                    'base.yaml',              # Load file
+                    {'env': 'staging'},       # Use dict
+                    'overrides.json',         # Load file
+                ]
+            )
         """
 
-        # Start with base config
-        base_config = {}
-        base_config_value = getattr(args, base_config_name.replace("-", "_"), None)
-        if base_config_value:
-            try:
-                base_config = load_structured_file(base_config_value)
-            except Exception as e:
-                raise ConfigurationError(
-                    f"Failed to load base config from {base_config_value}: {e}"
-                ) from e
+        # Stage 1: Normalize and apply base configs
+        normalized_configs = self._normalize_base_configs(base_configs)
+        config_dict = self._apply_base_configs(normalized_configs)
 
-        # Apply CLI argument overrides (only for included fields)
-        config_dict = self._merge_cli_args(base_config, args)
+        # Stage 2: Apply config file from --config argument
+        config_dict = self._apply_config_file(config_dict, args, base_config_name)
 
-        # Create and return config
+        # Stage 3: Apply CLI argument overrides
+        config_dict = self._apply_cli_overrides(config_dict, args)
+
+        # Stage 4: Create and return dataclass instance
         try:
             return self.config_class(**config_dict)
         except Exception as e:
@@ -452,29 +481,165 @@ class GenericConfigBuilder:
                 f"Failed to create {self.config_class.__name__}: {e}"
             ) from e
 
-    def _merge_cli_args(
-        self, base_config: Dict[str, Any], args: argparse.Namespace
-    ) -> Dict[str, Any]:
-        """Merge CLI arguments into base config."""
-        config = base_config.copy()
+    def _normalize_base_configs(
+        self, base_configs: Optional[BaseConfigInput]
+    ) -> List[Dict[str, Any]]:
+        """
+        Normalize base_configs input to list of dicts.
 
+        Accepts:
+        - None: Returns empty list
+        - str: Load file, return list with one dict
+        - dict: Return list with one dict
+        - list: Process each element (load files, keep dicts)
+
+        Args:
+            base_configs: Configuration input in various formats
+
+        Returns:
+            List of configuration dictionaries
+
+        Raises:
+            ConfigurationError: If file cannot be loaded or invalid type
+        """
+        if base_configs is None:
+            return []
+
+        # Single string path
+        if isinstance(base_configs, str):
+            try:
+                return [load_structured_file(base_configs)]
+            except Exception as e:
+                raise ConfigurationError(
+                    f"Failed to load base_configs from '{base_configs}': {e}"
+                ) from e
+
+        # Single dict
+        if isinstance(base_configs, dict):
+            return [base_configs]
+
+        # List of strings and/or dicts
+        if isinstance(base_configs, list):
+            result = []
+            for i, item in enumerate(base_configs):
+                if isinstance(item, str):
+                    try:
+                        result.append(load_structured_file(item))
+                    except Exception as e:
+                        raise ConfigurationError(
+                            f"Failed to load base_configs[{i}] from '{item}': {e}"
+                        ) from e
+                elif isinstance(item, dict):
+                    result.append(item)
+                else:
+                    raise ConfigurationError(
+                        f"base_configs[{i}] must be str or dict, got {type(item).__name__}"
+                    )
+            return result
+
+        raise ConfigurationError(
+            f"base_configs must be str, dict, or list, got {type(base_configs).__name__}"
+        )
+
+    def _apply_base_configs(
+        self, base_configs: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Apply base configuration dictionaries in order.
+
+        Args:
+            base_configs: List of configuration dictionaries to merge in order
+
+        Returns:
+            Merged configuration dictionary
+
+        Note:
+            Each config in the list is applied sequentially with shallow merge.
+            Later configs override earlier ones.
+        """
+        config = {}
+
+        for base_config in base_configs:
+            if not isinstance(base_config, dict):
+                raise ConfigurationError(
+                    f"base_configs must contain dictionaries, got {type(base_config)}"
+                )
+            # Shallow merge: later configs override earlier ones
+            config.update(base_config)
+
+        return config
+
+    def _apply_config_file(
+        self,
+        config: Dict[str, Any],
+        args: argparse.Namespace,
+        base_config_name: str,
+    ) -> Dict[str, Any]:
+        """
+        Load and merge configuration from --config file argument.
+
+        Args:
+            config: Current configuration dictionary
+            args: Parsed CLI arguments
+            base_config_name: Name of the config file argument
+
+        Returns:
+            Updated configuration dictionary with file config merged
+
+        Raises:
+            ConfigurationError: If file cannot be loaded
+        """
+        base_config_value = getattr(args, base_config_name.replace("-", "_"), None)
+
+        if base_config_value:
+            try:
+                file_config = load_structured_file(base_config_value)
+                # Merge file config into existing config (file overrides base_configs)
+                config.update(file_config)
+            except Exception as e:
+                raise ConfigurationError(
+                    f"Failed to load config file '{base_config_value}': {e}"
+                ) from e
+
+        return config
+
+    def _apply_cli_overrides(
+        self, config: Dict[str, Any], args: argparse.Namespace
+    ) -> Dict[str, Any]:
+        """
+        Apply CLI argument overrides to configuration.
+
+        Args:
+            config: Current configuration dictionary
+            args: Parsed CLI arguments
+
+        Returns:
+            Final configuration dictionary with CLI overrides applied
+
+        Raises:
+            ConfigurationError: If CLI argument processing fails
+
+        Note:
+            Only processes fields included in the dataclass (not excluded).
+            Handles special cases: lists, dicts, file-loadable fields, property overrides.
+        """
         # Only process fields that were included in CLI
         for field_name, info in self._config_fields.items():
             # Convert CLI arg name back to field name
             arg_name = field_name.replace("-", "_")
             cli_value = getattr(args, arg_name, None)
 
-            # Get override argument name
+            # Get override argument name for dict fields
             override_arg_name = info["override_name"][2:].replace("-", "_")
             override_value = getattr(args, override_arg_name, None)
 
             if cli_value is not None:
                 if info["is_list"]:
-                    # CLI values replace base config values (standard argparse behavior)
+                    # CLI values replace config values (standard argparse behavior)
                     # With nargs='+' or '*', cli_value is already a list
                     config[field_name] = cli_value
                 elif info["is_dict"]:
-                    # For dicts, load from file
+                    # For dicts, load from file and merge with existing dict
                     try:
                         dict_config = load_structured_file(cli_value)
                         existing = config.get(field_name, {})
@@ -558,36 +723,45 @@ def build_config_from_cli(
     config_class: Type,
     args: Optional[List[str]] = None,
     base_config_name: str = "config",
+    base_configs: Optional[BaseConfigInput] = None,
 ) -> Any:
     """
-    Convenience function to build any dataclass from CLI arguments.
+    Build dataclass instance from CLI arguments with optional base configs.
+
+    Configuration sources are merged in the following order (later sources override earlier):
+    1. base_configs (if provided) - files loaded and applied in order
+    2. Config file from --config argument (if provided)
+    3. CLI argument overrides
 
     Args:
         config_class: Dataclass type to build
         args: Command-line arguments (defaults to sys.argv[1:])
-        base_config_name: Name for base config file argument
+        base_config_name: Name for base config file argument (default: "config")
+        base_configs: Optional base configuration(s). Can be:
+                     - str: Path to a single config file
+                     - dict: A single configuration dictionary
+                     - List[Union[str, dict]]: Multiple configs applied in order
 
     Returns:
-        Instance of config_class built from CLI arguments
+        Instance of config_class built from merged configurations
 
     Example:
-        from dataclasses import dataclass
-        from dataclass_args import cli_exclude, cli_help, cli_file_loadable
-
-        @dataclass
-        class MyConfig:
-            name: str = cli_help("Service name")
-            message: str = cli_file_loadable(cli_help("Message text"))
-            items: Optional[List[str]] = None
-            settings: Optional[dict] = None
-            _secret: str = cli_exclude(default="hidden")
-
-        # Usage:
-        config = build_config_from_cli(MyConfig, [
-            '--name', 'test',
-            '--items', 'a', 'b', 'c',
-            '--message', '@/path/to/message.txt'
-        ])
+        # Single file
+        config = build_config_from_cli(MyConfig, base_configs='defaults.yaml')
+        
+        # Single dict
+        config = build_config_from_cli(MyConfig, base_configs={'debug': True})
+        
+        # Mixed list
+        config = build_config_from_cli(
+            MyConfig,
+            args=['--config', 'prod.yaml', '--name', 'override'],
+            base_configs=[
+                'company-defaults.yaml',
+                {'team': 'platform'},
+                'env-staging.json',
+            ]
+        )
     """
     if args is None:
         args = sys.argv[1:]
@@ -599,31 +773,48 @@ def build_config_from_cli(
     builder.add_arguments(parser, base_config_name)
 
     parsed_args = parser.parse_args(args)
-    return builder.build_config(parsed_args, base_config_name)
+    return builder.build_config(parsed_args, base_config_name, base_configs)
 
 
-def build_config(config_class: Type, args: Optional[List[str]] = None) -> Any:
+def build_config(
+    config_class: Type,
+    args: Optional[List[str]] = None,
+    base_configs: Optional[BaseConfigInput] = None,
+) -> Any:
     """
-    Simplified convenience function to build any dataclass from CLI arguments.
+    Simplified convenience function to build dataclass from CLI arguments.
 
-    Uses default settings suitable for most use cases.
+    Configuration sources are merged in the following order (later sources override earlier):
+    1. base_configs (if provided) - files loaded and applied in order
+    2. Config file from --config argument (if provided)
+    3. CLI argument overrides
 
     Args:
         config_class: Dataclass type to build
         args: Command-line arguments (defaults to sys.argv[1:])
+        base_configs: Optional base configuration(s). Can be:
+                     - str: Path to a single config file
+                     - dict: A single configuration dictionary
+                     - List[Union[str, dict]]: Multiple configs applied in order
 
     Returns:
-        Instance of config_class built from CLI arguments
+        Instance of config_class built from merged configurations
 
     Example:
-        from dataclasses import dataclass
-        from dataclass_args import build_config
-
-        @dataclass
-        class Config:
-            name: str
-            count: int = 10
-
-        config = build_config(Config)  # Parses sys.argv automatically
+        # Simple usage
+        config = build_config(Config)
+        
+        # With base config file
+        config = build_config(Config, base_configs='defaults.yaml')
+        
+        # With mixed sources
+        config = build_config(
+            Config,
+            args=['--count', '100'],
+            base_configs=[
+                'base.yaml',
+                {'environment': 'prod'},
+            ]
+        )
     """
-    return build_config_from_cli(config_class, args)
+    return build_config_from_cli(config_class, args, base_configs=base_configs)

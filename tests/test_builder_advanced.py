@@ -290,7 +290,7 @@ class TestBuilderErrorHandling:
         class TestConfig:
             name: str
 
-        with pytest.raises(ConfigurationError, match="Failed to load base config"):
+        with pytest.raises(ConfigurationError, match="Failed to load config file"):
             build_config(TestConfig, ["--config", "/nonexistent/config.json"])
 
     def test_dataclass_instantiation_error(self):

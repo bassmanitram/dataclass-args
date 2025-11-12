@@ -11,18 +11,17 @@ Generate command-line interfaces from Python dataclasses.
 
 ## Features
 
-- **Automatic CLI Generation** - Generate CLI from dataclass definitions
-- **Type-Safe Parsing** - Type-aware argument parsing for standard Python types
-- **Positional Arguments** - Support for positional args with `cli_positional()`
-- **Short Options** - Concise `-n` flags in addition to `--name`
-- **Boolean Flags** - Proper `--flag` and `--no-flag` boolean handling
-- **Value Validation** - Restrict values with `cli_choices()`
-- **File Loading** - Load parameters from files using `@filename` syntax
-- **Config Merging** - Combine configuration files with CLI overrides
-- **Flexible Types** - Support for `List`, `Dict`, `Optional`, and custom types
-- **Rich Annotations** - Custom help text, exclusions, and combinations
-- **Minimal Dependencies** - Lightweight with optional format support
-
+- **[Automatic CLI Generation](#quick-start)** - Generate CLI from dataclass definitions
+- **[Type-Safe Parsing](#type-support)** - Type-aware argument parsing for standard Python types
+- **[Positional Arguments](#positional-arguments)** - Support for positional args with `cli_positional()`
+- **[Short Options](#short-options)** - Concise `-n` flags in addition to `--name`
+- **[Boolean Flags](#boolean-flags)** - Proper `--flag` and `--no-flag` boolean handling
+- **[Value Validation](#value-choices)** - Restrict values with `cli_choices()`
+- **[File Loading](#file-loadable-parameters)** - Load parameters from files using `@filename` syntax
+- **[Config Merging](#configuration-merging)** - Combine configuration sources with hierarchical overrides
+- **[Flexible Types](#type-support)** - Support for `List`, `Dict`, `Optional`, and custom types
+- **[Rich Annotations](#combining-annotations)** - Custom help text, exclusions, and combinations
+- **[Minimal Dependencies](#installation)** - Lightweight with optional format support
 ## Quick Start
 
 ### Installation
@@ -508,6 +507,184 @@ class MLConfig:
         if self.epochs <= 0:
             raise ValueError("Epochs must be positive")
 ```
+
+
+### Configuration Merging
+
+Dataclass-args supports hierarchical configuration merging from multiple sources with clear precedence rules.
+
+#### Merge Order (Highest Priority Last)
+
+Configuration sources are merged in this order, with later sources overriding earlier ones:
+
+1. **Programmatic `base_configs`** (if provided) - Lowest priority
+2. **Config file** from `--config` CLI argument (if provided)
+3. **CLI arguments** - Highest priority
+
+#### Basic Usage
+
+Load a base configuration file and override with CLI arguments:
+
+```python
+from dataclasses import dataclass
+from dataclass_args import build_config
+
+@dataclass
+class AppConfig:
+    name: str
+    count: int = 10
+    region: str = "us-east-1"
+
+# Load from file, override with CLI
+config = build_config(
+    AppConfig,
+    args=['--config', 'prod.yaml', '--count', '100']
+)
+```
+
+**prod.yaml:**
+```yaml
+name: "ProductionApp"
+count: 50
+region: "eu-west-1"
+```
+
+**Result:**
+- `name`: "ProductionApp" (from file)
+- `count`: 100 (CLI override)
+- `region`: "eu-west-1" (from file)
+
+#### Programmatic Base Configs
+
+For advanced use cases, provide base configuration programmatically using the `base_configs` parameter:
+
+```python
+# Single file path
+config = build_config(AppConfig, base_configs='defaults.yaml')
+
+# Single configuration dict
+config = build_config(AppConfig, base_configs={'debug': True, 'count': 50})
+
+# List mixing files and dicts (applied in order)
+config = build_config(
+    AppConfig,
+    args=['--config', 'user.yaml', '--name', 'override'],
+    base_configs=[
+        'company-defaults.yaml',      # Company-wide defaults
+        {'environment': 'production'}, # Programmatic override
+        'team-overrides.json',        # Team-specific settings
+    ]
+)
+```
+
+**Merge order for the list example:**
+1. `company-defaults.yaml` (loaded and applied first)
+2. `{'environment': 'production'}` (overrides company defaults)
+3. `team-overrides.json` (loaded and overrides previous)
+4. `user.yaml` (from `--config`, overrides all base_configs)
+5. `--name 'override'` (CLI arg, highest priority)
+
+#### Merge Behavior by Type
+
+| Type | Behavior | Example |
+|------|----------|---------|
+| **Scalar** (str, int, float) | Replace | Later value replaces earlier value |
+| **List** | Replace | Later list replaces earlier list (not appended) |
+| **Dict** | Shallow merge | Keys are merged; later sources override earlier keys |
+
+**Dict merge example:**
+```python
+# base_configs[0]
+{'name': 'app', 'db': {'host': 'localhost', 'port': 5432}}
+
+# base_configs[1]
+{'db': {'port': 3306, 'timeout': 30}}
+
+# Result after merging:
+{'name': 'app', 'db': {'host': 'localhost', 'port': 3306, 'timeout': 30}}
+#  ^unchanged    ^merged: host kept, port updated, timeout added
+```
+
+#### Real-World Example
+
+```python
+import os
+from dataclasses import dataclass
+from dataclass_args import build_config
+
+@dataclass
+class DeployConfig:
+    app_name: str
+    environment: str
+    region: str = "us-east-1"
+    instance_count: int = 1
+
+# Determine environment
+env = os.getenv('ENV', 'dev')
+
+# Multi-layer configuration
+config = build_config(
+    DeployConfig,
+    args=['--config', '~/.myapp/personal.yaml', '--region', 'us-west-2'],
+    base_configs=[
+        'config/base.yaml',           # Company-wide defaults
+        f'config/{env}.yaml',         # Environment-specific (dev/staging/prod)
+        {'debug': True},              # Quick programmatic toggle
+    ]
+)
+
+# Configuration is built from all sources with clear precedence
+print(f"Deploying {config.app_name} to {config.environment}")
+```
+
+**Use Cases:**
+
+1. **Multi-environment deployments:**
+   ```python
+   config = build_config(
+       Config,
+       args=['--config', f'{env}.yaml'],
+       base_configs='base.yaml'
+   )
+   ```
+
+2. **Testing with fixtures:**
+   ```python
+   test_config = {'database': 'test_db', 'debug': True}
+   config = build_config(
+       AppConfig,
+       args=['--name', 'test-run'],
+       base_configs=test_config
+   )
+   ```
+
+3. **Team and personal settings:**
+   ```python
+   config = build_config(
+       Config,
+       base_configs=[
+           'company.yaml',      # Company defaults
+           'team.yaml',         # Team overrides
+           '~/.myapp/personal.yaml',  # Personal settings
+       ]
+   )
+   ```
+
+#### Complete Example
+
+See [`examples/config_merging_example.py`](examples/config_merging_example.py) for a comprehensive demonstration of configuration merging with multiple sources.
+
+```bash
+# Run the example
+python examples/config_merging_example.py multi-source
+```
+
+#### See Also
+
+- [Configuration File Formats](#configuration-file-formats) - Supported formats
+- [Type Support](#type-support) - Type-specific behavior
+- [API Reference](#api-reference) - Full API documentation
+
 
 ## API Reference
 
