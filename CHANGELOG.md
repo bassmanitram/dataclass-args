@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [1.2.0] - 2025-11-12
+
 ### Added
 - **Enhanced `base_configs` parameter** for flexible programmatic configuration merging
   - Accepts single config file path (`str`): `base_configs='defaults.yaml'`
@@ -198,7 +200,8 @@ No migration needed - this is the initial stable release.
 - Comprehensive test suite
 - Documentation and examples
 
-[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/bassmanitram/dataclass-args/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.1.0
 [1.0.1]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.0.1
 [1.0.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.0.0
