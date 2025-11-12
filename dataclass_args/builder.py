@@ -448,10 +448,10 @@ class GenericConfigBuilder:
         Example:
             # Single file path
             config = builder.build_config(args, base_configs='defaults.yaml')
-            
+
             # Single dict
             config = builder.build_config(args, base_configs={'debug': True})
-            
+
             # Mixed list
             config = builder.build_config(
                 args,
@@ -541,9 +541,7 @@ class GenericConfigBuilder:
             f"base_configs must be str, dict, or list, got {type(base_configs).__name__}"
         )
 
-    def _apply_base_configs(
-        self, base_configs: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _apply_base_configs(self, base_configs: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Apply base configuration dictionaries in order.
 
@@ -748,10 +746,10 @@ def build_config_from_cli(
     Example:
         # Single file
         config = build_config_from_cli(MyConfig, base_configs='defaults.yaml')
-        
+
         # Single dict
         config = build_config_from_cli(MyConfig, base_configs={'debug': True})
-        
+
         # Mixed list
         config = build_config_from_cli(
             MyConfig,
@@ -803,10 +801,10 @@ def build_config(
     Example:
         # Simple usage
         config = build_config(Config)
-        
+
         # With base config file
         config = build_config(Config, base_configs='defaults.yaml')
-        
+
         # With mixed sources
         config = build_config(
             Config,

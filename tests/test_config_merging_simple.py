@@ -18,6 +18,7 @@ from dataclass_args.exceptions import ConfigurationError
 @dataclass
 class SimpleConfig:
     """Simple config without booleans to avoid argparse edge cases."""
+
     name: str
     count: int = 10
     region: str = "us-east-1"
@@ -47,7 +48,7 @@ def test_single_dict_base_config():
     """Should use config from single dict."""
     config = build_config(
         SimpleConfig,
-        args=[],  # No CLI overrides  
+        args=[],  # No CLI overrides
         base_configs={"name": "from-dict", "count": 75},
     )
 
@@ -70,9 +71,9 @@ def test_mixed_list_base_configs():
             SimpleConfig,
             args=[],
             base_configs=[
-                file1_path,              # File
-                {"count": 25},           # Dict (overrides file1)
-                file2_path,              # File (overrides dict)
+                file1_path,  # File
+                {"count": 25},  # Dict (overrides file1)
+                file2_path,  # File (overrides dict)
             ],
         )
 
@@ -113,7 +114,7 @@ def test_cli_overrides_everything():
     )
 
     assert config.name == "cli"  # CLI overrides base_configs
-    assert config.count == 999  # CLI overrides base_configs  
+    assert config.count == 999  # CLI overrides base_configs
     assert config.region == "eu-west-1"  # From base_configs (not overridden)
 
 
@@ -126,12 +127,16 @@ def test_invalid_base_configs_type():
 def test_file_not_found():
     """Should raise error for non-existent file."""
     with pytest.raises(ConfigurationError, match="Failed to load base_configs"):
-        build_config(SimpleConfig, args=["--name", "test"], base_configs="/nonexistent/file.json")
+        build_config(
+            SimpleConfig, args=["--name", "test"], base_configs="/nonexistent/file.json"
+        )
 
 
 def test_invalid_list_item():
     """Should raise error for invalid item in base_configs list."""
-    with pytest.raises(ConfigurationError, match="base_configs\\[1\\] must be str or dict"):
+    with pytest.raises(
+        ConfigurationError, match="base_configs\\[1\\] must be str or dict"
+    ):
         build_config(
             SimpleConfig,
             args=["--name", "test"],

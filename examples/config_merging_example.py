@@ -146,9 +146,7 @@ def example_multi_source():
         "instance_count": 1,
         "log_level": "INFO",
     }
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(company_defaults, f)
         company_path = f.name
 
@@ -158,17 +156,13 @@ def example_multi_source():
         "instance_count": 5,
         "log_level": "WARNING",
     }
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(env_config, f)
         env_path = f.name
 
     # Create user overrides file
     user_overrides = {"region": "eu-west-1", "debug": False}
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(user_overrides, f)
         user_path = f.name
 
@@ -215,7 +209,9 @@ def example_multi_source():
         print(f"  Log Level: {config.log_level} (from team dict)")
 
         print("\nTrace:")
-        print("  name: company → env (no change) → team 'TeamApp' → user (no change) → CLI 'FinalApp' ✓")
+        print(
+            "  name: company → env (no change) → team 'TeamApp' → user (no change) → CLI 'FinalApp' ✓"
+        )
         print("  environment: company (default) → env 'production' ✓")
         print("  region: company 'us-east-1' → user 'eu-west-1' ✓")
         print("  instance_count: company 1 → env 5 ✓")
@@ -283,7 +279,9 @@ def main():
             example_testing_pattern()
         else:
             print(f"Unknown example: {example}")
-            print("Available examples: simple, with-file, programmatic, multi-source, testing")
+            print(
+                "Available examples: simple, with-file, programmatic, multi-source, testing"
+            )
     else:
         # Run all examples
         example_simple()
