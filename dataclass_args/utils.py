@@ -17,10 +17,12 @@ except ImportError:
 # Handle TOML imports for different Python versions
 if sys.version_info >= (3, 11):
     import tomllib
+
     HAS_TOML = True
 else:
     try:
         import tomli as tomllib  # type: ignore[no-redef]
+
         HAS_TOML = True
     except ImportError:
         HAS_TOML = False
