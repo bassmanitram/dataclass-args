@@ -31,7 +31,7 @@ jobs:
       run: |
         black --check dataclass_args/ tests/ examples/
         isort --check-only dataclass_args/ tests/ examples/
-        mypy dataclass_args/
+        mypy --python-version 3.10 dataclass_args/
         flake8 dataclass_args/
 
     - name: Test examples

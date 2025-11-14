@@ -153,7 +153,6 @@ line_length = 88
 known_first_party = ["dataclass_args"]
 
 [tool.mypy]
-python_version = "3.9"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false

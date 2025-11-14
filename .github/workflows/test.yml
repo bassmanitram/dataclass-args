@@ -45,7 +45,7 @@ jobs:
     - name: Type check with mypy (Python 3.9+)
       if: matrix.python-version != '3.8'
       run: |
-        mypy dataclass_args/
+        mypy --python-version ${{ matrix.python-version }} dataclass_args/
 
     - name: Test with pytest
       run: |
