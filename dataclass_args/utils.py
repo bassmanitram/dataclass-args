@@ -3,6 +3,7 @@ Utility functions for dataclass CLI configuration.
 """
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, Union
 
@@ -13,16 +14,13 @@ try:
 except ImportError:
     HAS_YAML = False
 
-try:
-    # Python 3.11+
+# Handle TOML imports for different Python versions
+if sys.version_info >= (3, 11):
     import tomllib
-
     HAS_TOML = True
-except ImportError:
+else:
     try:
-        # Python < 3.11
-        import tomli as tomllib
-
+        import tomli as tomllib  # type: ignore[no-redef]
         HAS_TOML = True
     except ImportError:
         HAS_TOML = False
