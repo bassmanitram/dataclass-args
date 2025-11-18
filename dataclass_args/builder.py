@@ -55,12 +55,15 @@ class GenericConfigBuilder:
     def __init__(
         self,
         config_class: Type,
+        description: Optional[str] = None,
     ):
         """
         Initialize builder for a specific dataclass type.
 
         Args:
             config_class: Dataclass type to build configurations for
+            description: Optional description for ArgumentParser help text.
+                        If not provided, uses "Build {ClassName} from CLI"
 
         Raises:
             ConfigBuilderError: If config_class is not a dataclass
@@ -71,6 +74,7 @@ class GenericConfigBuilder:
             )
 
         self.config_class = config_class
+        self.description = description
         self._config_fields = self._analyze_config_fields()
 
     def _should_include_field(
@@ -722,6 +726,7 @@ def build_config_from_cli(
     args: Optional[List[str]] = None,
     base_config_name: str = "config",
     base_configs: Optional[BaseConfigInput] = None,
+    description: Optional[str] = None,
 ) -> Any:
     """
     Build dataclass instance from CLI arguments with optional base configs.
@@ -739,6 +744,8 @@ def build_config_from_cli(
                      - str: Path to a single config file
                      - dict: A single configuration dictionary
                      - List[Union[str, dict]]: Multiple configs applied in order
+        description: Optional description for ArgumentParser help text.
+                    If not provided, uses "Build {ClassName} from CLI"
 
     Returns:
         Instance of config_class built from merged configurations
@@ -749,6 +756,12 @@ def build_config_from_cli(
 
         # Single dict
         config = build_config_from_cli(MyConfig, base_configs={'debug': True})
+
+        # With custom description
+        config = build_config_from_cli(
+            MyConfig,
+            description="Configure the application server"
+        )
 
         # Mixed list
         config = build_config_from_cli(
@@ -764,10 +777,14 @@ def build_config_from_cli(
     if args is None:
         args = sys.argv[1:]
 
-    builder = GenericConfigBuilder(config_class)
-    parser = argparse.ArgumentParser(
-        description=f"Build {config_class.__name__} from CLI"
+    builder = GenericConfigBuilder(config_class, description=description)
+
+    desc = (
+        builder.description
+        if builder.description is not None
+        else f"Build {config_class.__name__} from CLI"
     )
+    parser = argparse.ArgumentParser(description=desc)
     builder.add_arguments(parser, base_config_name)
 
     parsed_args = parser.parse_args(args)
@@ -778,6 +795,7 @@ def build_config(
     config_class: Type,
     args: Optional[List[str]] = None,
     base_configs: Optional[BaseConfigInput] = None,
+    description: Optional[str] = None,
 ) -> Any:
     """
     Simplified convenience function to build dataclass from CLI arguments.
@@ -794,6 +812,8 @@ def build_config(
                      - str: Path to a single config file
                      - dict: A single configuration dictionary
                      - List[Union[str, dict]]: Multiple configs applied in order
+        description: Optional description for ArgumentParser help text.
+                    If not provided, uses "Build {ClassName} from CLI"
 
     Returns:
         Instance of config_class built from merged configurations
@@ -805,6 +825,12 @@ def build_config(
         # With base config file
         config = build_config(Config, base_configs='defaults.yaml')
 
+        # With custom description
+        config = build_config(
+            Config,
+            description="My application configuration tool"
+        )
+
         # With mixed sources
         config = build_config(
             Config,
@@ -815,4 +841,6 @@ def build_config(
             ]
         )
     """
-    return build_config_from_cli(config_class, args, base_configs=base_configs)
+    return build_config_from_cli(
+        config_class, args, base_configs=base_configs, description=description
+    )
