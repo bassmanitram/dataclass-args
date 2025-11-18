@@ -3,6 +3,7 @@
 import sys
 from dataclasses import dataclass
 from io import StringIO
+from typing import List, Optional
 
 import pytest
 
@@ -162,7 +163,7 @@ class TestDescriptionWithComplexConfig:
         host: str = "localhost"
         port: int = 8080
         debug: bool = False
-        tags: list[str] = None
+        tags: Optional[List[str]] = None
 
         def __post_init__(self):
             if self.tags is None:
