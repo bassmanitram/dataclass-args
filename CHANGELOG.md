@@ -1,4 +1,27 @@
-## [Unreleased]
+## [1.2.1] - 2025-11-18
+
+### Added
+- **Optional `description` parameter** for custom ArgumentParser help text
+  - `GenericConfigBuilder.__init__()` now accepts optional `description` parameter
+  - `build_config()` and `build_config_from_cli()` accept optional `description` parameter
+  - Allows customization of help text instead of generic "Build {ClassName} from CLI" format
+  - Example: `build_config(ServerConfig, description="Server configuration management tool")`
+- New test suite: `tests/test_description.py` with 18 tests covering the description parameter
+- New example: `examples/custom_description_example.py` demonstrating custom descriptions
+
+### Changed
+- ArgumentParser description now uses custom text if provided, falls back to default format
+- Updated docstrings for `GenericConfigBuilder`, `build_config()`, and `build_config_from_cli()`
+
+### Fixed
+- None (backward compatible enhancement)
+
+### Quality
+- All 252 tests passing (234 existing + 18 new)
+- Test coverage: 93.90%
+- 100% backward compatible - no breaking changes
+- Python 3.8+ compatible (uses `typing.List` for compatibility)
+
 
 ## [1.2.0] - 2025-11-12
 
@@ -38,14 +61,6 @@
 - All 234 tests passing (224 existing + 10 new)
 - Test coverage: 94.15%
 - Backward compatible - no breaking changes
-
-
-# Changelog
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 ## [1.1.0] - 2024-11-02
@@ -113,7 +128,6 @@ class DebugConfig(PublicConfig):
 - Test coverage: 94.29%
 - Removed 6 obsolete tests for deprecated parameters
 
----
 
 ## [1.0.1] - 2025-11-02
 
@@ -181,7 +195,6 @@ This is the first production-ready release of dataclass-args. The API is now sta
 ### Migration from 0.x
 No migration needed - this is the initial stable release.
 
----
 
 ## [0.1.0] - 2025-01-30
 
@@ -200,7 +213,8 @@ No migration needed - this is the initial stable release.
 - Comprehensive test suite
 - Documentation and examples
 
-[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/bassmanitram/dataclass-args/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.1.0
 [1.0.1]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.0.1
