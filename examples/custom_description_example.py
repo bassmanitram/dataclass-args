@@ -28,7 +28,7 @@ def main():
         ServerConfig,
         description="""
         Server Configuration Tool
-        
+
         Configure the application server with custom host, port, and worker settings.
         The debug flag enables verbose logging for troubleshooting.
         """.strip(),

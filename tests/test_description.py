@@ -118,7 +118,7 @@ class TestCustomDescription:
     def test_multiline_description(self, capsys):
         """Test that multiline descriptions work correctly."""
         multiline_desc = """Configure the application server.
-        
+
 This tool allows you to set various server parameters
 including name, port, and other settings."""
 
