@@ -391,14 +391,12 @@ class GenericConfigBuilder:
         # Get default value
         default_value = info.get("default", False)
 
-        # Set parser default to the field's default value
-        parser.set_defaults(**{dest_name: default_value})
-
         # Add positive form (--flag or -f)
         parser.add_argument(
             *positive_args,
             action="store_true",
             dest=dest_name,
+            default=argparse.SUPPRESS,
             help=f"{help_text} (default: {default_value})",
         )
 
@@ -408,6 +406,7 @@ class GenericConfigBuilder:
             negative_name,
             action="store_false",
             dest=dest_name,
+            default=argparse.SUPPRESS,
             help=f"Disable {help_text}",
         )
 

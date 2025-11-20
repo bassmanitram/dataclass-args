@@ -1,3 +1,24 @@
+## [1.2.2] - 2025-11-20
+
+### Fixed
+- **Boolean fields from base_configs now work correctly**
+  - Fixed critical bug where boolean values from `base_configs` dict/files were always ignored
+  - Boolean fields now properly respect configuration hierarchy: `base_configs` < `--config` < CLI
+  - CLI flags correctly override `base_configs`; unspecified flags preserve `base_configs` values
+  - Technical: Changed `_add_boolean_argument()` to use `argparse.SUPPRESS` instead of `parser.set_defaults()`
+  - This resolves the known limitation documented in v1.2.0
+- Added 22 comprehensive tests in `tests/test_boolean_base_configs.py` covering all boolean scenarios
+
+### Quality
+- All 274 tests passing (252 existing + 22 new)
+- Test coverage: 93.89%
+- 100% backward compatible - no breaking changes
+
+### Migration
+No migration required. This fix only affects boolean fields used with `base_configs` parameter.
+If you were working around this bug, you can now remove workarounds.
+
+
 ## [1.2.1] - 2025-11-18
 
 ### Added
@@ -213,7 +234,8 @@ No migration needed - this is the initial stable release.
 - Comprehensive test suite
 - Documentation and examples
 
-[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/bassmanitram/dataclass-args/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/bassmanitram/dataclass-args/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bassmanitram/dataclass-args/releases/tag/v1.1.0
