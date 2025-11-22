@@ -31,10 +31,12 @@ jobs:
 
     - name: Run pre-commit hooks
       run: |
+        pip install pre-commit
         pre-commit run --all-files
 
     - name: Security check with bandit
       run: |
+        pip install bandit
         bandit -r dataclass_args/ -f json -o bandit-report.json || true
         bandit -r dataclass_args/ -f txt || true
 

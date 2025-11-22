@@ -34,19 +34,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev,all]"
 
-    - name: Lint with black
-      run: |
-        black --check dataclass_args/ tests/ examples/
-
-    - name: Sort imports with isort
-      run: |
-        isort --check-only dataclass_args/ tests/ examples/
-
-    - name: Type check with mypy (Python 3.9+)
-      if: matrix.python-version != '3.8'
-      run: |
-        mypy --python-version ${{ matrix.python-version }} dataclass_args/
-
     - name: Test with pytest
       run: |
         pytest tests/ --cov=dataclass_args --cov-report=xml --cov-report=term-missing
