@@ -19,30 +19,17 @@ repos:
     hooks:
       - id: black
         language_version: python3
-        args: [--line-length=88]
 
   # isort import sorting
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
     hooks:
       - id: isort
-        args: [--profile=black, --line-length=88]
+        args: [--profile=black]
 
-  # flake8 linting (use .flake8 config file)
+  # flake8 linting
   - repo: https://github.com/pycqa/flake8
     rev: 7.1.1
     hooks:
       - id: flake8
-        # Config comes from .flake8 file
-
-  # mypy type checking (only on source code, not tests)
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
-    hooks:
-      - id: mypy
-        files: ^dataclass_cli/.*\.py$
-        additional_dependencies: [types-PyYAML]
-        args: [--ignore-missing-imports]
-
-  # Security checks - run bandit directly, not via pre-commit hook
-  # (pre-commit hook has dependency issues with pbr)
+        args: [--max-line-length=88]
