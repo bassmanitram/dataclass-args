@@ -688,3 +688,154 @@ class TestAppendTyping:
         assert isinstance(config.pairs, list)
         assert all(isinstance(item, list) for item in config.pairs)
         assert all(all(isinstance(x, str) for x in item) for item in config.pairs)
+
+
+class TestAppendWithMinMaxArgs:
+    """Test cli_append with min_args/max_args range validation."""
+
+    def test_min_max_valid_range(self):
+        """Test that valid argument counts within range work."""
+
+        @dataclass
+        class Config:
+            files: List[List[str]] = combine_annotations(
+                cli_short("f"),
+                cli_append(min_args=1, max_args=2),
+                default_factory=list,
+            )
+
+        config = build_config(
+            Config,
+            args=[
+                "-f",
+                "file1",
+                "mime1",  # 2 args
+                "-f",
+                "file2",  # 1 arg
+                "-f",
+                "file3",
+                "mime3",  # 2 args
+            ],
+        )
+
+        assert config.files == [["file1", "mime1"], ["file2"], ["file3", "mime3"]]
+
+    def test_min_max_too_many_args(self):
+        """Test that exceeding max_args raises error."""
+
+        @dataclass
+        class Config:
+            files: List[List[str]] = combine_annotations(
+                cli_short("f"),
+                cli_append(min_args=1, max_args=2),
+                default_factory=list,
+            )
+
+        with pytest.raises(ConfigurationError, match="Expected at most 2 argument"):
+            build_config(Config, args=["-f", "file1", "arg2", "arg3", "arg4"])
+
+    def test_min_max_exact_range(self):
+        """Test min=max works correctly."""
+
+        @dataclass
+        class Config:
+            pairs: List[List[str]] = combine_annotations(
+                cli_short("p"),
+                cli_append(min_args=2, max_args=2),
+                default_factory=list,
+            )
+
+        config = build_config(Config, args=["-p", "k1", "v1", "-p", "k2", "v2"])
+
+        assert config.pairs == [["k1", "v1"], ["k2", "v2"]]
+
+        # Should fail with wrong count
+        with pytest.raises(ConfigurationError, match="Expected at most 2 argument"):
+            build_config(Config, args=["-p", "k1", "v1", "extra"])
+
+    def test_min_max_mutually_exclusive_with_nargs(self):
+        """Test that nargs and min/max_args cannot be used together."""
+
+        with pytest.raises(
+            ValueError, match="nargs.*min_args.*max_args.*mutually exclusive"
+        ):
+
+            @dataclass
+            class Config:
+                files: List[str] = combine_annotations(
+                    cli_append(nargs=2, min_args=1, max_args=2), default_factory=list
+                )
+
+    def test_min_max_must_be_used_together(self):
+        """Test that min_args requires max_args and vice versa."""
+
+        with pytest.raises(ValueError, match="must be used together"):
+
+            @dataclass
+            class Config:
+                files: List[str] = combine_annotations(
+                    cli_append(min_args=1), default_factory=list
+                )
+
+        with pytest.raises(ValueError, match="must be used together"):
+
+            @dataclass
+            class Config2:
+                files: List[str] = combine_annotations(
+                    cli_append(max_args=2), default_factory=list
+                )
+
+    def test_min_args_validation(self):
+        """Test that min_args must be >= 1."""
+
+        with pytest.raises(ValueError, match="min_args.*must be >= 1"):
+
+            @dataclass
+            class Config:
+                files: List[str] = combine_annotations(
+                    cli_append(min_args=0, max_args=2), default_factory=list
+                )
+
+    def test_max_args_validation(self):
+        """Test that max_args must be >= min_args."""
+
+        with pytest.raises(ValueError, match="max_args.*must be >= min_args"):
+
+            @dataclass
+            class Config:
+                files: List[str] = combine_annotations(
+                    cli_append(min_args=3, max_args=2), default_factory=list
+                )
+
+    def test_min_max_with_other_annotations(self):
+        """Test that min/max works with other annotations."""
+
+        @dataclass
+        class Config:
+            files: List[List[str]] = combine_annotations(
+                cli_short("f"),
+                cli_append(min_args=1, max_args=3, metavar="FILE [MIME] [ENCODING]"),
+                cli_help("Input files with optional metadata"),
+                default_factory=list,
+            )
+
+        config = build_config(
+            Config,
+            args=[
+                "-f",
+                "file1",
+                "text/plain",
+                "utf-8",  # 3 args
+                "-f",
+                "file2",  # 1 arg
+                "-f",
+                "file3",
+                "image/png",  # 2 args
+            ],
+        )
+
+        assert config.files == [
+            ["file1", "text/plain", "utf-8"],
+            ["file2"],
+            ["file3", "image/png"],
+        ]

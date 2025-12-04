@@ -219,7 +219,13 @@ def cli_file_loadable(**kwargs) -> Any:
     return field(**field_kwargs)
 
 
-def cli_append(nargs: Optional[Any] = None, **kwargs) -> Any:
+def cli_append(
+    nargs: Optional[Any] = None,
+    min_args: Optional[int] = None,
+    max_args: Optional[int] = None,
+    metavar: Optional[str] = None,
+    **kwargs,
+) -> Any:
     """
     Mark a field for append action - allows repeating the option multiple times.
 
@@ -227,12 +233,20 @@ def cli_append(nargs: Optional[Any] = None, **kwargs) -> Any:
     and all sub-lists are collected into the final list.
 
     Args:
-        nargs: Number of arguments per option occurrence
+        nargs: Number of arguments per option occurrence (traditional argparse style)
                None = exactly one (each -f takes 1 arg)
                '?' = zero or one
                '*' = zero or more
-               '+' = one or more (most common for append)
+               '+' = one or more
                int = exact count (e.g., 2 for pairs)
+               Mutually exclusive with min_args/max_args
+        min_args: Minimum arguments per occurrence (e.g., 1 for "at least 1")
+                  Must be used together with max_args
+                  Mutually exclusive with nargs
+        max_args: Maximum arguments per occurrence (e.g., 2 for "at most 2")
+                  Must be used together with min_args
+                  Mutually exclusive with nargs
+        metavar: Name for display in help text (e.g., "FILE [MIMETYPE]")
         **kwargs: Additional field parameters (default_factory, etc.)
 
     Returns:
@@ -280,11 +294,45 @@ def cli_append(nargs: Optional[Any] = None, **kwargs) -> Any:
         CLI: -f doc.pdf application/pdf -f image.png -f video.mp4 video/mp4
         Result: [['doc.pdf', 'application/pdf'], ['image.png'], ['video.mp4', 'video/mp4']]
 
+        With metavar for better help text:
+
+        >>> @dataclass
+        ... class Config:
+        ...     files: List[List[str]] = combine_annotations(
+        ...         cli_short('f'),
+        ...         cli_append(nargs='+', metavar="FILE [MIMETYPE]"),
+        ...         cli_help("File with optional MIME type"),
+        ...         default_factory=list
+        ...     )
+
     Note:
         - Field type should be List[T] for nargs=None, or List[List[T]] for nargs with multiple values
         - Always use default_factory=list for append fields
         - Cannot be combined with cli_positional()
     """
+    # Validate mutually exclusive parameters
+    if nargs is not None and (min_args is not None or max_args is not None):
+        raise ValueError(
+            "cli_append: 'nargs' and 'min_args'/'max_args' are mutually exclusive. "
+            "Use either nargs for standard argparse behavior, or min_args/max_args for range validation."
+        )
+
+    # Validate min_args/max_args must be used together
+    if (min_args is not None) != (max_args is not None):
+        raise ValueError(
+            "cli_append: 'min_args' and 'max_args' must be used together. "
+            f"Got min_args={min_args}, max_args={max_args}"
+        )
+
+    # Validate range constraints
+    if min_args is not None and max_args is not None:
+        if min_args < 1:
+            raise ValueError(f"cli_append: 'min_args' must be >= 1, got {min_args}")
+        if max_args < min_args:
+            raise ValueError(
+                f"cli_append: 'max_args' ({max_args}) must be >= min_args ({min_args})"
+            )
+
     field_kwargs = kwargs.copy()
     metadata = field_kwargs.pop("metadata", {})
     metadata["cli_append"] = True
@@ -292,7 +340,15 @@ def cli_append(nargs: Optional[Any] = None, **kwargs) -> Any:
     if nargs is not None:
         metadata["cli_append_nargs"] = nargs
 
-    # Move 'help' to metadata if present
+    if metavar is not None:
+        metadata["cli_append_metavar"] = metavar
+
+    if min_args is not None:
+        metadata["cli_append_min_args"] = min_args
+
+    if max_args is not None:
+        metadata["cli_append_max_args"] = max_args
+    # Move 'help' to metadata if present (dataclass field() doesn't accept it)
     if "help" in field_kwargs:
         metadata["cli_help"] = field_kwargs.pop("help")
 
@@ -458,6 +514,22 @@ def get_cli_append_nargs(field_info: Dict[str, Any]) -> Optional[Any]:
     field_obj = field_info.get("field_obj")
     if field_obj and hasattr(field_obj, "metadata"):
         return field_obj.metadata.get("cli_append_nargs")
+    return None
+
+
+def get_cli_append_metavar(field_info: Dict[str, Any]) -> Optional[str]:
+    """
+    Get metavar for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Metavar string if specified, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_metavar")
     return None
 
 
@@ -633,4 +705,36 @@ def get_cli_positional_metavar(field_info: Dict[str, Any]) -> Optional[str]:
     field_obj = field_info.get("field_obj")
     if field_obj and hasattr(field_obj, "metadata"):
         return field_obj.metadata.get("cli_positional_metavar")
+    return None
+
+
+def get_cli_append_min_args(field_info: Dict[str, Any]) -> Optional[int]:
+    """
+    Get minimum arguments for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Minimum argument count if specified, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_min_args")
+    return None
+
+
+def get_cli_append_max_args(field_info: Dict[str, Any]) -> Optional[int]:
+    """
+    Get maximum arguments for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Maximum argument count if specified, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_max_args")
     return None

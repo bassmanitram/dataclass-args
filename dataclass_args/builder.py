@@ -22,6 +22,9 @@ except ImportError:
     from typing_extensions import get_args, get_origin, get_type_hints  # type: ignore[assignment,no-redef]
 
 from .annotations import (
+    get_cli_append_max_args,
+    get_cli_append_metavar,
+    get_cli_append_min_args,
     get_cli_append_nargs,
     get_cli_choices,
     get_cli_help,
@@ -32,8 +35,10 @@ from .annotations import (
     is_cli_excluded,
     is_cli_positional,
 )
+from .append_action import RangeAppendAction
 from .exceptions import ConfigBuilderError, ConfigurationError
 from .file_loading import process_file_loadable_value
+from .formatter import RangeAppendHelpFormatter
 from .utils import load_structured_file
 
 # Type alias for base_configs parameter
@@ -399,6 +404,18 @@ class GenericConfigBuilder:
         # Get nargs from metadata
         append_nargs = get_cli_append_nargs(info)
 
+        # Get metavar from metadata
+        metavar = get_cli_append_metavar(info)
+
+        # Get min/max args from metadata
+        min_args = get_cli_append_min_args(info)
+        max_args = get_cli_append_max_args(info)
+
+        # If min/max specified, override nargs to '+' for flexible parsing
+        # Validation happens later in build_config()
+        if min_args is not None and max_args is not None:
+            append_nargs = "+"
+
         # Get type converter
         # For List[T], use T as the type
         # For List[List[T]], use T as the type (inner list handled by nargs)
@@ -420,14 +437,26 @@ class GenericConfigBuilder:
             arg_type = self._get_argument_type(info["type"])
 
         # Build kwargs for argparse
-        kwargs: Dict[str, Any] = {
-            "action": "append",
-            "type": arg_type,
-            "help": help_text + " (can be repeated)",
-        }
+        # Use custom action for min/max to enable clean metavar display
+        if min_args is not None and max_args is not None:
+            kwargs: Dict[str, Any] = {
+                "action": RangeAppendAction,
+                "type": arg_type,
+                "help": help_text
+                + f" (can be repeated, {min_args}-{max_args} args each)",
+            }
+        else:
+            kwargs = {
+                "action": "append",
+                "type": arg_type,
+                "help": help_text + " (can be repeated)",
+            }
 
         if append_nargs is not None:
             kwargs["nargs"] = append_nargs
+
+        if metavar is not None:
+            kwargs["metavar"] = metavar
 
         if choices:
             kwargs["choices"] = choices
@@ -490,6 +519,53 @@ class GenericConfigBuilder:
             # For complex types, use string and let validation handle it
             return str
 
+    def _validate_append_ranges(self, config_dict: Dict[str, Any]) -> None:
+        """
+        Validate min/max argument counts for append fields.
+
+        Args:
+            config_dict: Configuration dictionary after CLI parsing
+
+        Raises:
+            ConfigurationError: If any append field violates min/max constraints
+        """
+        for field_name, info in self._config_fields.items():
+            if not is_cli_append(info):
+                continue
+
+            min_args = get_cli_append_min_args(info)
+            max_args = get_cli_append_max_args(info)
+
+            # Skip if no range validation specified
+            if min_args is None or max_args is None:
+                continue
+
+            field_value = config_dict.get(field_name)
+            if not field_value:
+                continue  # Empty is OK (validated by required/optional)
+
+            # Validate each occurrence
+            for i, occurrence in enumerate(field_value):
+                # Normalize to list
+                if not isinstance(occurrence, list):
+                    occurrence = [occurrence]
+
+                arg_count = len(occurrence)
+
+                if arg_count < min_args:
+                    raise ConfigurationError(
+                        f"Field '{field_name}' occurrence #{i+1}: "
+                        f"Expected at least {min_args} argument(s), got {arg_count}. "
+                        f"Each occurrence must have between {min_args} and {max_args} argument(s)."
+                    )
+
+                if arg_count > max_args:
+                    raise ConfigurationError(
+                        f"Field '{field_name}' occurrence #{i+1}: "
+                        f"Expected at most {max_args} argument(s), got {arg_count}. "
+                        f"Each occurrence must have between {min_args} and {max_args} argument(s)."
+                    )
+
     def build_config(
         self,
         args: argparse.Namespace,
@@ -547,6 +623,8 @@ class GenericConfigBuilder:
         # Stage 3: Apply CLI argument overrides
         config_dict = self._apply_cli_overrides(config_dict, args)
 
+        # Stage 3.5: Validate append field ranges (if min_args/max_args specified)
+        self._validate_append_ranges(config_dict)
         # Stage 4: Create and return dataclass instance
         try:
             return self.config_class(**config_dict)
@@ -855,7 +933,9 @@ def build_config_from_cli(
         if builder.description is not None
         else f"Build {config_class.__name__} from CLI"
     )
-    parser = argparse.ArgumentParser(description=desc)
+    parser = argparse.ArgumentParser(
+        description=desc, formatter_class=RangeAppendHelpFormatter
+    )
     builder.add_arguments(parser, base_config_name)
 
     parsed_args = parser.parse_args(args)
