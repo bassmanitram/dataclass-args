@@ -240,7 +240,7 @@ class UploadConfig:
         cli_help("File with optional MIME type"),
         default_factory=list
     )
-    
+
     def __post_init__(self):
         for file_spec in self.files:
             if len(file_spec) < 1 or len(file_spec) > 2:

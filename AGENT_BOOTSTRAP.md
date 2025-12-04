@@ -351,7 +351,7 @@ Example from v1.3.0: Adding `cli_append()` annotation
        # Validate parameters
        if nargs is not None and (min_args is not None or max_args is not None):
            raise ValueError("nargs and min_args/max_args are mutually exclusive")
-       
+
        field_kwargs = kwargs.copy()
        metadata = field_kwargs.pop("metadata", {})
        metadata["cli_append"] = True
@@ -365,14 +365,14 @@ Example from v1.3.0: Adding `cli_append()` annotation
            metadata["cli_append_metavar"] = metavar
        field_kwargs["metadata"] = metadata
        return field(**field_kwargs)
-   
+
    def is_cli_append(field_info: Dict[str, Any]) -> bool:
        """Check if field uses append action."""
        field_obj = field_info.get("field_obj")
        if field_obj and hasattr(field_obj, "metadata"):
            return field_obj.metadata.get("cli_append", False)
        return False
-   
+
    def get_cli_append_nargs(field_info: Dict[str, Any]) -> Optional[Any]:
        """Get nargs value for append argument."""
        field_obj = field_info.get("field_obj")
@@ -390,13 +390,13 @@ Example from v1.3.0: Adding `cli_append()` annotation
 3. **Use in builder.py**:
    ```python
    from .annotations import is_cli_append, get_cli_append_nargs
-   
+
    def _add_field_argument(self, parser, field_name, info):
        if is_cli_append(info):
            self._add_append_argument(parser, arg_names, info, help_text, choices)
            return
        # ... rest of logic
-   
+
    def _add_append_argument(self, parser, arg_names, info, help_text, choices):
        append_nargs = get_cli_append_nargs(info)
        # Get element type for List[T] or List[List[T]]

@@ -200,8 +200,8 @@ class DockerConfig:
         cli_help("Port mapping (HOST CONTAINER)"),
         default_factory=list
     )
-    
-    # Each -v takes exactly 2 arguments (SOURCE TARGET) 
+
+    # Each -v takes exactly 2 arguments (SOURCE TARGET)
     volumes: List[List[str]] = combine_annotations(
         cli_short('v'),
         cli_append(nargs=2),
