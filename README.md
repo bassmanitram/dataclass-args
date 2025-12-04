@@ -18,6 +18,7 @@ Generate command-line interfaces from Python dataclasses.
 - **[Short Options](#short-options)** - Concise `-n` flags in addition to `--name`
 - **[Boolean Flags](#boolean-flags)** - Proper `--flag` and `--no-flag` boolean handling
 - **[Value Validation](#value-choices)** - Restrict values with `cli_choices()`
+- **[Repeatable Options](#repeatable-options)** - Allow options to be specified multiple times with `cli_append()`
 - **[File Loading](#file-loadable-parameters)** - Load parameters from files using `@filename` syntax
 - **[Config Merging](#configuration-merging)** - Combine configuration sources with hierarchical overrides
 - **[Flexible Types](#type-support)** - Support for `List`, `Dict`, `Optional`, and custom types
@@ -160,6 +161,97 @@ error: argument --environment: invalid choice: 'invalid' (choose from 'dev', 'st
 ```
 
 
+
+### Repeatable Options
+
+Use `cli_append()` to allow an option to be specified multiple times, with each occurrence collecting its own arguments:
+
+```python
+from dataclass_args import cli_append
+
+@dataclass
+class Config:
+    # Simple tags: each -t adds one value
+    tags: List[str] = combine_annotations(
+        cli_short('t'),
+        cli_append(),
+        cli_help("Add a tag"),
+        default_factory=list
+    )
+```
+
+```bash
+# Each -t occurrence accumulates
+$ python app.py -t python -t cli -t tool
+# Result: ['python', 'cli', 'tool']
+```
+
+#### Repeatable with Multiple Arguments
+
+Each occurrence can take multiple arguments using `nargs`:
+
+```python
+@dataclass
+class DockerConfig:
+    # Each -p takes exactly 2 arguments (HOST CONTAINER)
+    ports: List[List[str]] = combine_annotations(
+        cli_short('p'),
+        cli_append(nargs=2),
+        cli_help("Port mapping (HOST CONTAINER)"),
+        default_factory=list
+    )
+    
+    # Each -v takes exactly 2 arguments (SOURCE TARGET) 
+    volumes: List[List[str]] = combine_annotations(
+        cli_short('v'),
+        cli_append(nargs=2),
+        cli_help("Volume mount (SOURCE TARGET)"),
+        default_factory=list
+    )
+```
+
+```bash
+$ python docker.py -p 8080 80 -p 8443 443 -v /host/data /container/data
+```
+
+#### Variable Arguments (1 or 2)
+
+Use `nargs='+'` with validation for "1 or 2" arguments:
+
+```python
+@dataclass
+class UploadConfig:
+    files: List[List[str]] = combine_annotations(
+        cli_short('f'),
+        cli_append(nargs='+'),
+        cli_help("File with optional MIME type"),
+        default_factory=list
+    )
+    
+    def __post_init__(self):
+        # Validate each file has 1 or 2 arguments
+        for file_spec in self.files:
+            if len(file_spec) < 1 or len(file_spec) > 2:
+                raise ValueError("Each file must have 1-2 arguments")
+```
+
+```bash
+# Mix files with and without MIME types
+$ python upload.py -f doc.pdf application/pdf -f image.png -f video.mp4 video/mp4
+# Result: [['doc.pdf', 'application/pdf'], ['image.png'], ['video.mp4', 'video/mp4']]
+```
+
+**nargs Options:**
+- `None` - One value per occurrence → `List[T]`
+- `int` (e.g., `2`) - Exact count per occurrence → `List[List[T]]`
+- `'+'` - One or more per occurrence → `List[List[T]]`
+- `'*'` - Zero or more per occurrence → `List[List[T]]`
+
+**Use Cases:**
+- Docker-style options: `-p 8080:80 -p 8443:443 -v /host:/container -e KEY=value`
+- File operations: `-f file1 type1 -f file2 -f file3 type3`
+- Server pools: `-s host1 port1 -s host2 port2`
+- Build systems: `-I dir1 -I dir2 --define KEY VAL`
 
 ### Positional Arguments
 

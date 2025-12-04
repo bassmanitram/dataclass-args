@@ -43,6 +43,7 @@ Advanced Usage:
 """
 
 from .annotations import (
+    cli_append,
     cli_choices,
     cli_exclude,
     cli_file_loadable,
@@ -51,10 +52,12 @@ from .annotations import (
     cli_positional,
     cli_short,
     combine_annotations,
+    get_cli_append_nargs,
     get_cli_choices,
     get_cli_positional_metavar,
     get_cli_positional_nargs,
     get_cli_short,
+    is_cli_append,
     is_cli_excluded,
     is_cli_file_loadable,
     is_cli_included,
@@ -65,7 +68,7 @@ from .exceptions import ConfigBuilderError, ConfigurationError, FileLoadingError
 from .file_loading import is_file_loadable_value, load_file_content
 from .utils import load_structured_file
 
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 
 __all__ = [
     # Main API
@@ -80,15 +83,18 @@ __all__ = [
     "cli_include",
     "cli_file_loadable",
     "cli_positional",
+    "cli_append",
     "combine_annotations",
     "get_cli_short",
     "get_cli_choices",
     "get_cli_positional_nargs",
     "get_cli_positional_metavar",
+    "get_cli_append_nargs",
     "is_cli_file_loadable",
     "is_cli_excluded",
     "is_cli_included",
     "is_cli_positional",
+    "is_cli_append",
     # File loading
     "load_file_content",
     "is_file_loadable_value",

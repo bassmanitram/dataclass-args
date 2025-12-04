@@ -22,11 +22,13 @@ except ImportError:
     from typing_extensions import get_args, get_origin, get_type_hints  # type: ignore[assignment,no-redef]
 
 from .annotations import (
+    get_cli_append_nargs,
     get_cli_choices,
     get_cli_help,
     get_cli_positional_metavar,
     get_cli_positional_nargs,
     get_cli_short,
+    is_cli_append,
     is_cli_excluded,
     is_cli_positional,
 )
@@ -50,6 +52,7 @@ class GenericConfigBuilder:
     - File-loadable string parameters via '@' prefix
     - Hierarchical merging of configuration sources
     - Field filtering via cli_exclude() annotations
+    - Append action for repeatable options
     """
 
     def __init__(
@@ -328,6 +331,11 @@ class GenericConfigBuilder:
             else:
                 help_text = f"choices: {choices_str}"
 
+        # Check if this is an append field
+        if is_cli_append(info):
+            self._add_append_argument(parser, arg_names, info, help_text, choices)
+            return
+
         if info["is_list"]:
             # List parameters accept multiple values after a single flag
             # Use nargs='+' for required lists (one or more values)
@@ -367,6 +375,69 @@ class GenericConfigBuilder:
             parser.add_argument(
                 *arg_names, type=arg_type, choices=choices, help=help_text
             )
+
+    def _add_append_argument(
+        self,
+        parser: argparse.ArgumentParser,
+        arg_names: List[str],
+        info: Dict[str, Any],
+        help_text: str,
+        choices: Optional[List[Any]],
+    ) -> None:
+        """
+        Add append-action argument to parser.
+
+        Supports repeated options where each occurrence collects its arguments.
+
+        Args:
+            parser: ArgumentParser to add arguments to
+            arg_names: List of argument names (short and/or long form)
+            info: Field information dictionary
+            help_text: Help text for the argument
+            choices: Optional list of valid choices
+        """
+        # Get nargs from metadata
+        append_nargs = get_cli_append_nargs(info)
+
+        # Get type converter
+        # For List[T], use T as the type
+        # For List[List[T]], use T as the type (inner list handled by nargs)
+        if info["is_list"] and info["args"]:
+            element_type = info["args"][0]
+            # Check if it's List[List[T]]
+            element_origin = get_origin(element_type)
+            if element_origin is list:
+                # List[List[T]] - get inner type T
+                element_args = get_args(element_type)
+                if element_args:
+                    arg_type = self._get_argument_type(element_args[0])
+                else:
+                    arg_type = str
+            else:
+                # List[T] - use T directly
+                arg_type = self._get_argument_type(element_type)
+        else:
+            arg_type = self._get_argument_type(info["type"])
+
+        # Build kwargs for argparse
+        kwargs: Dict[str, Any] = {
+            "action": "append",
+            "type": arg_type,
+            "help": help_text + " (can be repeated)",
+        }
+
+        if append_nargs is not None:
+            kwargs["nargs"] = append_nargs
+
+        if choices:
+            kwargs["choices"] = choices
+
+        # Add default
+        default = info.get("default")
+        if default is not None:
+            kwargs["default"] = default
+
+        parser.add_argument(*arg_names, **kwargs)
 
     def _add_boolean_argument(
         self, parser: argparse.ArgumentParser, field_name: str, info: Dict[str, Any]
@@ -622,7 +693,7 @@ class GenericConfigBuilder:
 
         Note:
             Only processes fields included in the dataclass (not excluded).
-            Handles special cases: lists, dicts, file-loadable fields, property overrides.
+            Handles special cases: lists, dicts, file-loadable fields, property overrides, append actions.
         """
         # Only process fields that were included in CLI
         for field_name, info in self._config_fields.items():
@@ -638,6 +709,7 @@ class GenericConfigBuilder:
                 if info["is_list"]:
                     # CLI values replace config values (standard argparse behavior)
                     # With nargs='+' or '*', cli_value is already a list
+                    # With action='append', cli_value is a list of sub-lists (if nargs specified) or list of values
                     config[field_name] = cli_value
                 elif info["is_dict"]:
                     # For dicts, load from file and merge with existing dict

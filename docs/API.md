@@ -172,6 +172,119 @@ options:
 
 ---
 
+### `cli_append(nargs=None, **kwargs)`
+
+Mark a field for append action - allows repeating the option multiple times.
+
+Each occurrence of the option collects its arguments, and all occurrences accumulate into a list.
+
+**Parameters:**
+- `nargs` (Optional[Union[int, str]]): Number of arguments per occurrence:
+  - `None` (default): One value per occurrence → `List[T]`
+  - `int` (e.g., `2`): Exact count per occurrence → `List[List[T]]`
+  - `'+'`: One or more per occurrence → `List[List[T]]`
+  - `'*'`: Zero or more per occurrence → `List[List[T]]`
+  - `'?'`: Zero or one per occurrence → `List[T]`
+- `**kwargs`: Field parameters including `default_factory` (required)
+
+**Returns:**
+- `Field` with append action metadata
+
+**Important:** Always use `default_factory=list`, not `default=[]`
+
+**Examples:**
+
+```python
+from typing import List
+from dataclass_args import cli_append, cli_short, cli_help, combine_annotations
+
+# Simple tags (single value per -t)
+@dataclass
+class Config:
+    tags: List[str] = combine_annotations(
+        cli_short('t'),
+        cli_append(),
+        default_factory=list
+    )
+
+# CLI: -t python -t cli -t tool
+# Result: ['python', 'cli', 'tool']
+
+# Pairs (exactly 2 per occurrence)
+@dataclass
+class DockerConfig:
+    ports: List[List[str]] = combine_annotations(
+        cli_short('p'),
+        cli_append(nargs=2),
+        cli_help("Port mapping (HOST CONTAINER)"),
+        default_factory=list
+    )
+
+# CLI: -p 8080 80 -p 8443 443
+# Result: [['8080', '80'], ['8443', '443']]
+
+# Variable args with validation (1 or 2 per occurrence)
+@dataclass
+class UploadConfig:
+    files: List[List[str]] = combine_annotations(
+        cli_short('f'),
+        cli_append(nargs='+'),
+        cli_help("File with optional MIME type"),
+        default_factory=list
+    )
+    
+    def __post_init__(self):
+        for file_spec in self.files:
+            if len(file_spec) < 1 or len(file_spec) > 2:
+                raise ValueError("Each file needs 1-2 arguments")
+
+# CLI: -f doc.pdf application/pdf -f image.png -f video.mp4 video/mp4
+# Result: [['doc.pdf', 'application/pdf'], ['image.png'], ['video.mp4', 'video/mp4']]
+
+# Environment variables
+@dataclass
+class AppConfig:
+    env_vars: List[List[str]] = combine_annotations(
+        cli_short('e'),
+        cli_append(nargs=2),
+        cli_help("Environment variable (KEY VALUE)"),
+        default_factory=list
+    )
+
+# CLI: -e DEBUG true -e LOG_LEVEL info -e PORT 8080
+# Result: [['DEBUG', 'true'], ['LOG_LEVEL', 'info'], ['PORT', '8080']]
+```
+
+**Use Cases:**
+- Docker-style options: `-p HOST:CONTAINER`, `-v SOURCE:TARGET`, `-e KEY=VALUE`
+- File operations: `-f file type`, multiple file uploads
+- Server pools: `-s host port` repeated
+- Build systems: `-I dir`, `-D key value`
+- Tag/label collection: `-t tag` repeated
+
+**Comparison with Regular Lists:**
+
+Regular `List[T]` (single flag, all values after it):
+```python
+files: List[str] = cli_short('f', default_factory=list)
+# CLI: -f file1 file2 file3
+# Problem: -f file1 -f file2 → Only ['file2'] (last wins)
+```
+
+With `cli_append()` (repeated flags accumulate):
+```python
+files: List[str] = combine_annotations(
+    cli_short('f'),
+    cli_append(),
+    default_factory=list
+)
+# CLI: -f file1 -f file2 -f file3
+# Result: ['file1', 'file2', 'file3'] ← All accumulated!
+```
+
+---
+
+
 ### `cli_positional(nargs=None, metavar=None, **kwargs)`
 
 Mark a field as a positional argument (no `--` prefix required).

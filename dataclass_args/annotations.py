@@ -219,6 +219,87 @@ def cli_file_loadable(**kwargs) -> Any:
     return field(**field_kwargs)
 
 
+def cli_append(nargs: Optional[Any] = None, **kwargs) -> Any:
+    """
+    Mark a field for append action - allows repeating the option multiple times.
+
+    Each occurrence of the option collects its arguments into a sub-list,
+    and all sub-lists are collected into the final list.
+
+    Args:
+        nargs: Number of arguments per option occurrence
+               None = exactly one (each -f takes 1 arg)
+               '?' = zero or one
+               '*' = zero or more
+               '+' = one or more (most common for append)
+               int = exact count (e.g., 2 for pairs)
+        **kwargs: Additional field parameters (default_factory, etc.)
+
+    Returns:
+        Field object with append metadata
+
+    Examples:
+        Basic append with single values:
+
+        >>> @dataclass
+        ... class Config:
+        ...     tags: List[str] = cli_append()
+
+        CLI: -t python -t cli -t dataclass
+        Result: ['python', 'cli', 'dataclass']
+
+        Append with pairs (nargs=2):
+
+        >>> @dataclass
+        ... class Config:
+        ...     files: List[List[str]] = cli_append(nargs=2)
+
+        CLI: -f file1.txt text/plain -f file2.jpg image/jpeg
+        Result: [['file1.txt', 'text/plain'], ['file2.jpg', 'image/jpeg']]
+
+        Append with variable args (nargs='+'):
+
+        >>> @dataclass
+        ... class Config:
+        ...     groups: List[List[str]] = cli_append(nargs='+')
+
+        CLI: -g file1 file2 -g file3 -g file4 file5 file6
+        Result: [['file1', 'file2'], ['file3'], ['file4', 'file5', 'file6']]
+
+        Combined with other annotations:
+
+        >>> @dataclass
+        ... class Config:
+        ...     files: List[List[str]] = combine_annotations(
+        ...         cli_short('f'),
+        ...         cli_append(nargs='+'),
+        ...         cli_help("File with optional MIME type"),
+        ...         default_factory=list
+        ...     )
+
+        CLI: -f doc.pdf application/pdf -f image.png -f video.mp4 video/mp4
+        Result: [['doc.pdf', 'application/pdf'], ['image.png'], ['video.mp4', 'video/mp4']]
+
+    Note:
+        - Field type should be List[T] for nargs=None, or List[List[T]] for nargs with multiple values
+        - Always use default_factory=list for append fields
+        - Cannot be combined with cli_positional()
+    """
+    field_kwargs = kwargs.copy()
+    metadata = field_kwargs.pop("metadata", {})
+    metadata["cli_append"] = True
+
+    if nargs is not None:
+        metadata["cli_append_nargs"] = nargs
+
+    # Move 'help' to metadata if present
+    if "help" in field_kwargs:
+        metadata["cli_help"] = field_kwargs.pop("help")
+
+    field_kwargs["metadata"] = metadata
+    return field(**field_kwargs)
+
+
 def combine_annotations(*annotations, **field_kwargs) -> Any:
     """
     Combine multiple CLI annotations into a single field.
@@ -316,6 +397,22 @@ def is_cli_file_loadable(field_info: Dict[str, Any]) -> bool:
     return False
 
 
+def is_cli_append(field_info: Dict[str, Any]) -> bool:
+    """
+    Check if a field uses append action for repeated options.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        True if field uses append action
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append", False)
+    return False
+
+
 def get_cli_short(field_info: Dict[str, Any]) -> Optional[str]:
     """
     Get short option character for a CLI argument.
@@ -345,6 +442,22 @@ def get_cli_choices(field_info: Dict[str, Any]) -> Optional[List[Any]]:
     field_obj = field_info.get("field_obj")
     if field_obj and hasattr(field_obj, "metadata"):
         return field_obj.metadata.get("cli_choices")
+    return None
+
+
+def get_cli_append_nargs(field_info: Dict[str, Any]) -> Optional[Any]:
+    """
+    Get nargs value for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        nargs value if specified, otherwise None (meaning exactly one per occurrence)
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_nargs")
     return None
 
 
