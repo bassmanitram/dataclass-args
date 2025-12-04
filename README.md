@@ -214,32 +214,43 @@ class DockerConfig:
 $ python docker.py -p 8080 80 -p 8443 443 -v /host/data /container/data
 ```
 
-#### Variable Arguments (1 or 2)
+#### Variable Arguments with Validation
 
-Use `nargs='+'` with validation for "1 or 2" arguments:
+Use `min_args` and `max_args` for flexible argument counts with automatic validation:
 
 ```python
 @dataclass
 class UploadConfig:
     files: List[List[str]] = combine_annotations(
         cli_short('f'),
-        cli_append(nargs='+'),
+        cli_append(min_args=1, max_args=2, metavar="FILE [MIMETYPE]"),
         cli_help("File with optional MIME type"),
         default_factory=list
     )
-    
-    def __post_init__(self):
-        # Validate each file has 1 or 2 arguments
-        for file_spec in self.files:
-            if len(file_spec) < 1 or len(file_spec) > 2:
-                raise ValueError("Each file must have 1-2 arguments")
+    # No __post_init__ needed - validation is automatic!
 ```
 
 ```bash
 # Mix files with and without MIME types
 $ python upload.py -f doc.pdf application/pdf -f image.png -f video.mp4 video/mp4
 # Result: [['doc.pdf', 'application/pdf'], ['image.png'], ['video.mp4', 'video/mp4']]
+
+# Validation catches errors automatically
+$ python upload.py -f file1 arg2 arg3 arg4
+# Error: Expected at most 2 argument(s), got 4
 ```
+
+**Clean help display:**
+```
+-f FILE [MIMETYPE], --files FILE [MIMETYPE]
+    File with optional MIME type (can be repeated, 1-2 args each)
+```
+
+**Parameters:**
+- `min_args`: Minimum arguments per occurrence
+- `max_args`: Maximum arguments per occurrence
+- Must be used together (both or neither)
+- Mutually exclusive with `nargs`
 
 **nargs Options:**
 - `None` - One value per occurrence → `List[T]`

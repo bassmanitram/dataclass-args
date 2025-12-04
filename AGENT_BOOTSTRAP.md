@@ -38,10 +38,11 @@ The library eliminates boilerplate code for creating CLIs by automatically gener
 - Restrict field values to valid choices
 - Example: `cli_choices(['dev', 'staging', 'prod'])`
 
-### 6. **Repeatable Options** (`cli_append`) - NEW in v1.3.0
+### 6. **Repeatable Options** (`cli_append`)
 - Allow options to be specified multiple times
 - Each occurrence collects its own arguments
-- Supports `nargs` for multi-argument occurrences
+- Supports `nargs` for exact/variable argument counts
+- Supports `min_args`/`max_args` for flexible validation (NEW in v1.3.0)
 - Example: `-f file1 mime1 -f file2 -f file3 mime3`
 - Use cases: Docker-style options, file uploads, environment variables
 
@@ -80,7 +81,7 @@ dataclass-args/
 │   ├── exceptions.py       # Custom exceptions
 │   ├── file_loading.py     # File loading with @ syntax
 │   └── utils.py            # Helper functions (load_structured_file, etc.)
-├── tests/                   # Test suite (306 tests, 92.96% coverage)
+├── tests/                   # Test suite (314 tests, 92.59% coverage)
 │   ├── test_basic.py
 │   ├── test_annotations.py
 │   ├── test_boolean_flags.py
@@ -139,14 +140,16 @@ Key methods:
 - `add_arguments(parser)` - Add all fields as arguments
 - `build_config(args, base_configs=None)` - Build final config instance
 - `_validate_positional_arguments()` - Enforce positional constraints
-- `_add_append_argument()` - Handle repeatable options (NEW in v1.3.0)
+- `_validate_append_ranges()` - Validate min/max args for append fields (NEW in v1.3.0)
+- `_add_append_argument()` - Handle repeatable options with min/max support
 
 #### 2. Annotation System (annotations.py)
 Field metadata system using Python's `field(metadata={...})`:
 - `cli_short(letter)` - Short option flag
 - `cli_choices(choices_list)` - Value validation
 - `cli_positional(nargs=None, metavar=None)` - Positional argument
-- `cli_append(nargs=None)` - Repeatable option (NEW in v1.3.0)
+- `cli_append(nargs=None, min_args=None, max_args=None, metavar=None)` - Repeatable option
+  - NEW in v1.3.0: min_args/max_args for automatic validation
 - `cli_help(text)` - Custom help text
 - `cli_exclude()` - Hide from CLI
 - `cli_file_loadable()` - Enable @file loading
@@ -337,13 +340,29 @@ Example from v1.3.0: Adding `cli_append()` annotation
 
 1. **Define in annotations.py**:
    ```python
-   def cli_append(nargs: Optional[Any] = None, **kwargs) -> Any:
+   def cli_append(
+       nargs: Optional[Any] = None,
+       min_args: Optional[int] = None,
+       max_args: Optional[int] = None,
+       metavar: Optional[str] = None,
+       **kwargs
+   ) -> Any:
        """Mark field for append action - allows repeating the option."""
+       # Validate parameters
+       if nargs is not None and (min_args is not None or max_args is not None):
+           raise ValueError("nargs and min_args/max_args are mutually exclusive")
+       
        field_kwargs = kwargs.copy()
        metadata = field_kwargs.pop("metadata", {})
        metadata["cli_append"] = True
        if nargs is not None:
            metadata["cli_append_nargs"] = nargs
+       if min_args is not None:
+           metadata["cli_append_min_args"] = min_args
+       if max_args is not None:
+           metadata["cli_append_max_args"] = max_args
+       if metavar is not None:
+           metadata["cli_append_metavar"] = metavar
        field_kwargs["metadata"] = metadata
        return field(**field_kwargs)
    
@@ -485,10 +504,13 @@ if field_obj and hasattr(field_obj, "metadata"):
 
 ### v1.3.0 (2024-12-XX) - Current
 - **Added**: Repeatable options with `cli_append(nargs=None)`
+- **Added**: `min_args`/`max_args` for flexible argument validation (NEW)
 - Enables Docker-style CLIs: `-p 8080 80 -p 8443 443`
 - Supports variable args per occurrence: `-f file mime -f file`
-- 306 tests, 92.96% coverage
-- 32 new tests, all backward compatible
+- Clean help display with custom HelpFormatter
+- Automatic validation with clear error messages
+- 314 tests, 92.59% coverage
+- 40 new tests (32 for cli_append + 8 for min/max), all backward compatible
 
 ### v1.2.2 (2024-11-20)
 - **Fixed**: Boolean fields from base_configs now work correctly
@@ -564,13 +586,18 @@ if field_obj and hasattr(field_obj, "metadata"):
 **Problem**: Path separator issues
 **Solution**: Use `Path` from `pathlib` for cross-platform paths
 
-### 7. Append Not Accumulating (NEW)
+### 7. Append Not Accumulating
 **Problem**: Multiple `-f` flags, only last one kept
 **Solution**: Use `cli_append()` instead of regular `List[T]` field
 
-### 8. Append with Wrong Type (NEW)
+### 8. Append with Wrong Type
 **Problem**: `List[str]` with `cli_append(nargs=2)` causes type mismatch
 **Solution**: Use `List[List[str]]` when `nargs` takes multiple arguments
+
+### 9. Min/Max Args Validation (NEW in v1.3.0)
+**Problem**: Need to validate argument count per occurrence (e.g., 1-2 args)
+**Solution**: Use `cli_append(min_args=1, max_args=2)` for automatic validation
+**Note**: Mutually exclusive with `nargs`, must use both min/max together
 
 ## Quick Reference
 
@@ -601,13 +628,20 @@ env: str = cli_choices(['dev', 'staging', 'prod'])
 # Positional
 source: str = cli_positional()
 
-# Repeatable (NEW)
+# Repeatable
 tags: List[str] = cli_append(default_factory=list)
 
-# Repeatable with pairs (NEW)
+# Repeatable with exact count
 ports: List[List[str]] = combine_annotations(
     cli_short('p'),
     cli_append(nargs=2),
+    default_factory=list
+)
+
+# Repeatable with variable count (NEW in v1.3.0)
+files: List[List[str]] = combine_annotations(
+    cli_short('f'),
+    cli_append(min_args=1, max_args=2, metavar="FILE [MIME]"),
     default_factory=list
 )
 

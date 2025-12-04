@@ -172,7 +172,7 @@ options:
 
 ---
 
-### `cli_append(nargs=None, **kwargs)`
+### `cli_append(nargs=None, min_args=None, max_args=None, metavar=None, **kwargs)`
 
 Mark a field for append action - allows repeating the option multiple times.
 
@@ -185,6 +185,14 @@ Each occurrence of the option collects its arguments, and all occurrences accumu
   - `'+'`: One or more per occurrence → `List[List[T]]`
   - `'*'`: Zero or more per occurrence → `List[List[T]]`
   - `'?'`: Zero or one per occurrence → `List[T]`
+  - **Mutually exclusive with** `min_args`/`max_args`
+- `min_args` (Optional[int]): Minimum arguments per occurrence (must be >= 1)
+  - Must be used together with `max_args`
+  - Provides automatic validation with clear error messages
+- `max_args` (Optional[int]): Maximum arguments per occurrence (must be >= min_args)
+  - Must be used together with `min_args`
+  - Enables clean help text display
+- `metavar` (Optional[str]): Custom display name for arguments in help text
 - `**kwargs`: Field parameters including `default_factory` (required)
 
 **Returns:**
