@@ -1,702 +1,282 @@
-# Dataclass Args - Agent Bootstrap Guide
-
-## Project Overview
-
-**dataclass-args** is a Python library that provides zero-boilerplate CLI generation from Python dataclasses with advanced type support and file loading capabilities. It transforms dataclass definitions into fully-featured command-line interfaces with minimal code.
-
-- **Repository**: https://github.com/bassmanitram/dataclass-args
-- **PyPI Package**: https://pypi.org/project/dataclass-args/
-- **Current Version**: 1.3.0
-- **License**: MIT
-- **Python Support**: 3.8, 3.9, 3.10, 3.11, 3.12
-
-## Core Purpose
-
-The library eliminates boilerplate code for creating CLIs by automatically generating argument parsers from dataclass definitions. It bridges the gap between configuration management and command-line interfaces with a type-safe, annotation-based approach.
-
-## Key Features
-
-### 1. **Automatic CLI Generation**
-- Single function call (`build_config()`) generates complete CLI from dataclass
-- Automatic help text generation and argument parsing
-- Type-aware parsing for all standard Python types
-
-### 2. **Short Options** (`cli_short`)
-- Concise `-n` flags in addition to `--name` long forms
-- Example: `cli_short('n', default="value")`
-
-### 3. **Boolean Flags**
-- Proper `--flag` and `--no-flag` boolean handling
-- No need for `store_true`/`store_false` boilerplate
-
-### 4. **Positional Arguments** (`cli_positional`)
-- Support for positional args without `--` prefix
-- Variable length support: `nargs='?'`, `'*'`, `'+'`, or exact count
-- Validation: At most one greedy positional, must be last
-
-### 5. **Value Validation** (`cli_choices`)
-- Restrict field values to valid choices
-- Example: `cli_choices(['dev', 'staging', 'prod'])`
-
-### 6. **Repeatable Options** (`cli_append`)
-- Allow options to be specified multiple times
-- Each occurrence collects its own arguments
-- Supports `nargs` for exact/variable argument counts
-- Supports `min_args`/`max_args` for flexible validation (NEW in v1.3.0)
-- Example: `-f file1 mime1 -f file2 -f file3 mime3`
-- Use cases: Docker-style options, file uploads, environment variables
-
-### 7. **File Loading** (`cli_file_loadable`)
-- Load string parameters from files using `@filename` syntax
-- Home directory expansion: `@~/file.txt`
-- Example: `--prompt "@~/prompts/system.txt"`
-
-### 8. **Configuration Merging** (`base_configs`)
-- Hierarchical config merging from multiple sources
-- Order: `base_configs` → `--config` file → CLI args
-- Accepts: single file, dict, or list of files/dicts
-
-### 9. **Flexible Types**
-- Support for `List`, `Dict`, `Optional`, `Path`, and custom types
-- Nested dictionary property overrides
-
-### 10. **Annotation Combining** (`combine_annotations`)
-- Merge multiple features: short options + choices + help + append
-- Clean, readable field definitions
-
-### 11. **Custom Help Text** (`cli_help`, `description` parameter)
-- Field-level custom help with `cli_help()`
-- Program-level custom description parameter
-
-## Architecture
-
-### Project Structure
-
-```
-dataclass-args/
-├── dataclass_args/          # Main package
-│   ├── __init__.py         # Public API exports
-│   ├── annotations.py      # Field annotation utilities (cli_short, cli_append, etc.)
-│   ├── builder.py          # GenericConfigBuilder - core logic
-│   ├── exceptions.py       # Custom exceptions
-│   ├── file_loading.py     # File loading with @ syntax
-│   └── utils.py            # Helper functions (load_structured_file, etc.)
-├── tests/                   # Test suite (314 tests, 92.59% coverage)
-│   ├── test_basic.py
-│   ├── test_annotations.py
-│   ├── test_boolean_flags.py
-│   ├── test_boolean_base_configs.py
-│   ├── test_cli_short.py
-│   ├── test_cli_choices.py
-│   ├── test_cli_append.py          # NEW in v1.3.0
-│   ├── test_positional.py
-│   ├── test_config_merging_simple.py
-│   ├── test_description.py
-│   ├── test_combine_annotations.py
-│   ├── test_file_loading.py
-│   ├── test_builder_advanced.py
-│   └── test_utils.py
-├── examples/                # Working examples
-│   ├── basic_example.py
-│   ├── advanced_example.py
-│   ├── all_features_example.py
-│   ├── boolean_flags_example.py
-│   ├── cli_short_example.py
-│   ├── cli_choices_example.py
-│   ├── cli_append_example.py       # NEW in v1.3.0
-│   ├── positional_example.py
-│   ├── config_merging_example.py
-│   └── custom_description_example.py
-├── docs/                    # Documentation
-│   ├── API.md
-│   ├── COVERAGE.md
-│   └── research/           # Implementation notes
-├── .github/workflows/       # CI/CD pipelines
-│   ├── test.yml            # Cross-platform testing
-│   ├── lint.yml            # Code quality
-│   ├── quality.yml         # Type checking, security
-│   ├── examples.yml        # Example validation
-│   ├── release.yml         # PyPI publishing
-│   └── docs.yml            # Documentation
-├── pyproject.toml          # Package configuration
-├── README.md               # User documentation
-├── CHANGELOG.md            # Version history
-├── CONTRIBUTING.md         # Development guide
-├── Makefile                # Development tasks
-└── LICENSE                 # MIT license
-```
-
-### Core Components
-
-#### 1. `GenericConfigBuilder` (builder.py)
-The central class that orchestrates CLI generation:
-- **Initialization**: Analyzes dataclass fields, extracts type hints and metadata
-- **Argument Addition**: Generates argparse arguments from field definitions
-- **Configuration Building**: Merges configs from multiple sources
-- **Validation**: Enforces constraints (e.g., positional list rules)
-
-Key methods:
-- `__init__(config_class, description=None)` - Initialize builder
-- `add_arguments(parser)` - Add all fields as arguments
-- `build_config(args, base_configs=None)` - Build final config instance
-- `_validate_positional_arguments()` - Enforce positional constraints
-- `_validate_append_ranges()` - Validate min/max args for append fields (NEW in v1.3.0)
-- `_add_append_argument()` - Handle repeatable options with min/max support
-
-#### 2. Annotation System (annotations.py)
-Field metadata system using Python's `field(metadata={...})`:
-- `cli_short(letter)` - Short option flag
-- `cli_choices(choices_list)` - Value validation
-- `cli_positional(nargs=None, metavar=None)` - Positional argument
-- `cli_append(nargs=None, min_args=None, max_args=None, metavar=None)` - Repeatable option
-  - NEW in v1.3.0: min_args/max_args for automatic validation
-- `cli_help(text)` - Custom help text
-- `cli_exclude()` - Hide from CLI
-- `cli_file_loadable()` - Enable @file loading
-- `combine_annotations(*annotations)` - Merge multiple features
-
-#### 3. Configuration Merging (builder.py)
-Four-stage hierarchical merge:
-1. **Programmatic base_configs** (lowest priority)
-   - Files: Loaded via `load_structured_file()`
-   - Dicts: Used directly
-   - List: Applied sequentially
-2. **Config file from `--config`**
-   - Overrides base_configs
-3. **CLI arguments** (highest priority)
-   - Override all previous sources
-4. **Dataclass instantiation**
-   - Create final instance
-
-Merge behavior:
-- **Scalars**: Replace
-- **Lists**: Replace (not append)
-  - Exception: cli_append() fields accumulate repeated occurrences
-- **Dicts**: Shallow merge (keys merged, later overrides earlier)
-
-#### 4. File Loading (file_loading.py)
-Handle `@filename` syntax for string fields:
-- Detect `@` prefix: `is_file_loadable_value()`
-- Load content: `load_file_content()` with path expansion
-- Process fields: `process_file_loadable_value()`
-- Home expansion: `~/` → user home, `~user/` → other user
-
-#### 5. Type System Integration
-Leverages Python's typing system:
-- Type hints extraction via `get_type_hints()`
-- Generic type inspection: `get_origin()`, `get_args()`
-- Support for: `List[T]`, `List[List[T]]`, `Dict[K, V]`, `Optional[T]`, `Union`, `Path`
-- Custom type handling via string conversion
-
-### Configuration Flow
-
-```
-User defines dataclass
-        ↓
-build_config() called
-        ↓
-GenericConfigBuilder created
-        ↓
-Field analysis (types, annotations, defaults)
-        ↓
-ArgumentParser generation
-  - Detect cli_append() → use action='append'
-  - Detect cli_positional() → positional args
-  - Regular fields → optional args
-        ↓
-Parse CLI arguments
-        ↓
-Configuration merge:
-  1. base_configs (if provided)
-  2. --config file (if provided)
-  3. CLI overrides
-        ↓
-Dataclass instantiation
-        ↓
-Return configured instance
-```
-
-## Development Workflow
-
-### Setup
-```bash
-# Clone repository
-git clone https://github.com/bassmanitram/dataclass-args.git
-cd dataclass-args
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dev dependencies
-pip install -e ".[dev,all]"
-
-# Setup pre-commit hooks
-make setup
-```
-
-### Testing
-```bash
-# Run all tests (automatic coverage via pytest.ini)
-pytest
-
-# Detailed coverage report
-make coverage
-
-# Coverage HTML report (opens browser)
-make coverage-html
-
-# Run specific test file
-pytest tests/test_cli_append.py
-
-# Run with verbose output
-pytest -v
-```
-
-**Test Coverage**: 92.96% (306 tests passing)
-- Minimum required: 90%
-- Coverage config: `pyproject.toml` [tool.coverage]
-
-### Code Quality
-```bash
-# Format code (Black + isort)
-make format
-
-# Run linting
-make lint
-# - black --check
-# - isort --check-only
-# - mypy (type checking)
-# - flake8 (style checking)
-
-# Full check (lint + test + examples)
-make check
-```
-
-### Style Standards
-- **Line length**: 88 (Black default)
-- **Import sorting**: isort with Black profile
-- **Type hints**: Required for public APIs
-- **Docstrings**: Google-style format
-- **Python version**: 3.8+ (use `typing.List` not `list` for 3.8 compat)
-
-### Running Examples
-```bash
-# Individual examples
-python examples/basic_example.py --name "Test" --count 5
-python examples/cli_short_example.py -n MyApp -p 9000
-python examples/cli_append_example.py docker  # NEW in v1.3.0
-python examples/positional_example.py source.txt dest.txt
-
-# All examples via Makefile
-make examples
-```
-
-### CI/CD Pipeline
-GitHub Actions workflows (`.github/workflows/`):
-- **test.yml**: Cross-platform testing (Ubuntu, Windows, macOS) × Python 3.8-3.12
-- **lint.yml**: Black, isort, flake8 checks
-- **quality.yml**: mypy type checking, bandit security scan
-- **examples.yml**: Validate all examples run successfully
-- **release.yml**: Automated PyPI publishing on tag push
-- **docs.yml**: Documentation generation/validation
-
-## Common Development Tasks
-
-### Adding a New Feature
-
-1. **Design Phase**
-   - Document in `local/` or `docs/research/`
-   - Consider backward compatibility
-   - Design API (annotations, functions, types)
-
-2. **Implementation**
-   - Add code to appropriate module (annotations.py, builder.py, etc.)
-   - Update `__all__` exports in `__init__.py`
-   - Add type hints and docstrings
-
-3. **Testing**
-   - Add test file: `tests/test_<feature>.py`
-   - Aim for >90% coverage for new code
-   - Include edge cases, error handling
-
-4. **Documentation**
-   - Update README.md with usage examples
-   - Update CHANGELOG.md
-   - Add example script in `examples/` if significant
-   - Update API.md if needed
-
-5. **Validation**
-   ```bash
-   make format  # Format code
-   make lint    # Check style
-   pytest       # Run tests
-   make check   # Full validation
-   ```
-
-### Adding a New Annotation
-
-Example from v1.3.0: Adding `cli_append()` annotation
-
-1. **Define in annotations.py**:
-   ```python
-   def cli_append(
-       nargs: Optional[Any] = None,
-       min_args: Optional[int] = None,
-       max_args: Optional[int] = None,
-       metavar: Optional[str] = None,
-       **kwargs
-   ) -> Any:
-       """Mark field for append action - allows repeating the option."""
-       # Validate parameters
-       if nargs is not None and (min_args is not None or max_args is not None):
-           raise ValueError("nargs and min_args/max_args are mutually exclusive")
-
-       field_kwargs = kwargs.copy()
-       metadata = field_kwargs.pop("metadata", {})
-       metadata["cli_append"] = True
-       if nargs is not None:
-           metadata["cli_append_nargs"] = nargs
-       if min_args is not None:
-           metadata["cli_append_min_args"] = min_args
-       if max_args is not None:
-           metadata["cli_append_max_args"] = max_args
-       if metavar is not None:
-           metadata["cli_append_metavar"] = metavar
-       field_kwargs["metadata"] = metadata
-       return field(**field_kwargs)
-
-   def is_cli_append(field_info: Dict[str, Any]) -> bool:
-       """Check if field uses append action."""
-       field_obj = field_info.get("field_obj")
-       if field_obj and hasattr(field_obj, "metadata"):
-           return field_obj.metadata.get("cli_append", False)
-       return False
-
-   def get_cli_append_nargs(field_info: Dict[str, Any]) -> Optional[Any]:
-       """Get nargs value for append argument."""
-       field_obj = field_info.get("field_obj")
-       if field_obj and hasattr(field_obj, "metadata"):
-           return field_obj.metadata.get("cli_append_nargs")
-       return None
-   ```
-
-2. **Export in __init__.py**:
-   ```python
-   from .annotations import cli_append, is_cli_append, get_cli_append_nargs
-   __all__ = [..., "cli_append", "is_cli_append", "get_cli_append_nargs"]
-   ```
-
-3. **Use in builder.py**:
-   ```python
-   from .annotations import is_cli_append, get_cli_append_nargs
-
-   def _add_field_argument(self, parser, field_name, info):
-       if is_cli_append(info):
-           self._add_append_argument(parser, arg_names, info, help_text, choices)
-           return
-       # ... rest of logic
-
-   def _add_append_argument(self, parser, arg_names, info, help_text, choices):
-       append_nargs = get_cli_append_nargs(info)
-       # Get element type for List[T] or List[List[T]]
-       # ... type detection logic
-       kwargs = {
-           "action": "append",
-           "type": arg_type,
-           "help": help_text + " (can be repeated)",
-       }
-       if append_nargs is not None:
-           kwargs["nargs"] = append_nargs
-       parser.add_argument(*arg_names, **kwargs)
-   ```
-
-4. **Add tests** in `tests/test_cli_append.py` (32 tests added)
-
-5. **Document** in README.md, API.md, and add example
-
-### Debugging Tips
-
-1. **Test Isolation**: Run single test with `-v` for details
-   ```bash
-   pytest tests/test_cli_append.py::TestBasicAppend::test_append_single_values -v
-   ```
-
-2. **Coverage Gaps**: Check HTML report
-   ```bash
-   make coverage-html
-   # Opens htmlcov/index.html
-   ```
-
-3. **Type Issues**: Run mypy on specific file
-   ```bash
-   mypy dataclass_args/builder.py
-   ```
-
-4. **argparse Behavior**: Use `--debug` in examples, inspect `parser.parse_args()`
-
-5. **Config Merging**: Add print statements in `_apply_*()` methods
-
-6. **Append Behavior**: Check if `action='append'` is set in argparse args
-
-## Important Constraints and Patterns
-
-### Positional Arguments
-**Critical Rule**: At most ONE positional can use `nargs='*'` or `'+'`, and it MUST be last.
-
-**Why**: Positional lists are greedy - they consume all remaining arguments. Multiple greedy positionals or positionals after a list create ambiguous CLIs that argparse cannot parse.
-
-**Validation**: `_validate_positional_arguments()` enforces this at build time.
-
-**Workaround**: Use optional arguments with flags for additional lists:
-```python
-files: List[str] = cli_positional(nargs='+')      # OK: positional list
-exclude: List[str] = cli_short('e', default_factory=list)  # OK: optional list
-```
-
-### Repeatable Options (cli_append)
-**New in v1.3.0**: Use `cli_append()` for options that should accumulate when repeated.
-
-**Pattern**: Each occurrence of the flag collects its own arguments:
-```python
-files: List[List[str]] = combine_annotations(
-    cli_short('f'),
-    cli_append(nargs=2),  # Each -f takes 2 args
-    default_factory=list
-)
-# CLI: -f file1 mime1 -f file2 mime2
-# Result: [['file1', 'mime1'], ['file2', 'mime2']]
-```
-
-**Important**: Always use `default_factory=list`, not `default=[]`
-
-**Comparison with regular List**:
-- Regular `List[str]`: `-f a b c` → all values after single flag
-- `cli_append()`: `-f a -f b -f c` → repeated flag accumulates
-
-### Boolean Fields and base_configs
-**Fixed in v1.2.2**: Boolean values from `base_configs` now work correctly.
-
-**Implementation**: Uses `argparse.SUPPRESS` instead of `set_defaults()` to preserve config hierarchy:
-- Unspecified CLI flags → preserve `base_configs` value
-- Specified CLI flags → override `base_configs` value
-
-### Type Compatibility
-**Python 3.8 Support**: Use `typing.List` not `list` for type hints.
-```python
-# Correct (3.8+)
-from typing import List
-files: List[str]
-
-# Wrong (3.9+ only)
-files: list[str]
-```
-
-### Metadata Access
-Always check field metadata exists:
-```python
-field_obj = info.get("field_obj")
-if field_obj and hasattr(field_obj, "metadata"):
-    value = field_obj.metadata.get("key", default)
-```
-
-## Version History and Compatibility
-
-### v1.3.0 (2024-12-XX) - Current
-- **Added**: Repeatable options with `cli_append(nargs=None)`
-- **Added**: `min_args`/`max_args` for flexible argument validation (NEW)
-- Enables Docker-style CLIs: `-p 8080 80 -p 8443 443`
-- Supports variable args per occurrence: `-f file mime -f file`
-- Clean help display with custom HelpFormatter
-- Automatic validation with clear error messages
-- 314 tests, 92.59% coverage
-- 40 new tests (32 for cli_append + 8 for min/max), all backward compatible
-
-### v1.2.2 (2024-11-20)
-- **Fixed**: Boolean fields from base_configs now work correctly
-- 274 tests, 93.89% coverage
-- All backward compatible
-
-### v1.2.1 (2024-11-18)
-- **Added**: Optional `description` parameter for custom help text
-- 252 tests, 93.90% coverage
-
-### v1.2.0 (2024-11-12)
-- **Added**: Enhanced `base_configs` with file/dict/list support
-- Configuration merging with clear precedence
-- 234 tests, 94.15% coverage
-
-### v1.1.0 (2024-11-02)
-- **Removed**: Unused `exclude_fields`, `field_filter` parameters
-- API simplification (80% surface area reduction)
-- 224 tests, 94.29% coverage
-
-### v1.0.1 (2024-11-02)
-- **Added**: Home directory expansion for file loading (`~/`)
-- 234 tests, 94.35% coverage
-
-### v1.0.0 (2024-01-31) - First Stable Release
-- Complete feature set stabilized
-- 216 tests, ~92% coverage
-- API frozen (semantic versioning from this point)
-
-**Migration**: No breaking changes since 1.0.0. All 1.x versions are backward compatible.
-
-## Dependencies
-
-### Core (Required)
-- `typing-extensions>=4.0.0` - Backport of typing features for Python 3.8
-
-### Optional
-- **YAML support**: `PyYAML>=6.0` - Install with `pip install "dataclass-args[yaml]"`
-- **TOML support**: `tomli>=2.0.0` (Python <3.11) - Install with `pip install "dataclass-args[toml]"`
-- **All formats**: `pip install "dataclass-args[all]"`
-
-### Development Only
-- `pytest>=7.0.0`, `pytest-cov>=4.0.0` - Testing
-- `black>=23.0.0`, `isort>=5.12.0` - Formatting
-- `mypy>=1.0.0` - Type checking
-- `flake8>=6.0.0` - Linting
-- `pre-commit>=3.0.0` - Git hooks
-- `bandit>=1.7.0` - Security scanning
-
-## Common Pitfalls and Solutions
-
-### 1. Import Errors
-**Problem**: `ModuleNotFoundError: No module named 'dataclass_args'`
-**Solution**: Install in development mode: `pip install -e .`
-
-### 2. Coverage Not Running
-**Problem**: Tests pass but no coverage report
-**Solution**: Coverage is automatic via `pyproject.toml`. Use `make coverage` for details.
-
-### 3. Positional List Error
-**Problem**: `ConfigBuilderError: Positional list argument must be last`
-**Solution**: Make later arguments optional with flags, or use only one positional list.
-
-### 4. Boolean Not Overriding
-**Problem**: Boolean from base_configs doesn't apply
-**Solution**: Fixed in v1.2.2. Upgrade: `pip install --upgrade dataclass-args`
-
-### 5. Type Checking Failures
-**Problem**: mypy errors with `List[str]`
-**Solution**: Import from `typing`: `from typing import List`
-
-### 6. Tests Fail on Windows
-**Problem**: Path separator issues
-**Solution**: Use `Path` from `pathlib` for cross-platform paths
-
-### 7. Append Not Accumulating
-**Problem**: Multiple `-f` flags, only last one kept
-**Solution**: Use `cli_append()` instead of regular `List[T]` field
-
-### 8. Append with Wrong Type
-**Problem**: `List[str]` with `cli_append(nargs=2)` causes type mismatch
-**Solution**: Use `List[List[str]]` when `nargs` takes multiple arguments
-
-### 9. Min/Max Args Validation (NEW in v1.3.0)
-**Problem**: Need to validate argument count per occurrence (e.g., 1-2 args)
-**Solution**: Use `cli_append(min_args=1, max_args=2)` for automatic validation
-**Note**: Mutually exclusive with `nargs`, must use both min/max together
-
-## Quick Reference
-
-### Most Used Commands
-```bash
-pytest                          # Run tests
-make coverage                   # Coverage report
-make format                     # Format code
-make lint                       # Check style
-make check                      # Full validation
-python examples/<name>.py       # Run example
-```
-
-### Key Files to Modify
-- **New feature**: Start with `dataclass_args/annotations.py` or `builder.py`
-- **New test**: Add `tests/test_<feature>.py`
-- **Documentation**: Update `README.md`, `CHANGELOG.md`, `API.md`
-- **Example**: Add `examples/<feature>_example.py`
-
-### Common Annotations
-```python
-# Short option
-name: str = cli_short('n')
-
-# Choices
-env: str = cli_choices(['dev', 'staging', 'prod'])
-
-# Positional
-source: str = cli_positional()
-
-# Repeatable
-tags: List[str] = cli_append(default_factory=list)
-
-# Repeatable with exact count
-ports: List[List[str]] = combine_annotations(
-    cli_short('p'),
-    cli_append(nargs=2),
-    default_factory=list
-)
-
-# Repeatable with variable count (NEW in v1.3.0)
-files: List[List[str]] = combine_annotations(
-    cli_short('f'),
-    cli_append(min_args=1, max_args=2, metavar="FILE [MIME]"),
-    default_factory=list
-)
-
-# Combined
-region: str = combine_annotations(
-    cli_short('r'),
-    cli_choices(['us-east', 'us-west']),
-    cli_help("AWS region"),
-    default='us-east'
-)
-```
-
-### Code Review Checklist
-- [ ] Type hints on all public functions
-- [ ] Docstrings in Google style
-- [ ] Tests added (>90% coverage)
-- [ ] `make format` run
-- [ ] `make lint` passes
-- [ ] `make check` passes
-- [ ] CHANGELOG.md updated
-- [ ] README.md updated (if user-facing)
-- [ ] API.md updated (for new API)
-- [ ] Example added (if significant feature)
-- [ ] Backward compatible (or documented breaking change)
-
-## Getting Help
-
-- **Documentation**: Start with README.md and API.md
-- **Examples**: Check `examples/` directory for working code
-- **Tests**: Look at `tests/` for usage patterns
-- **Issues**: Search GitHub issues for similar problems
-- **Research**: Check `docs/research/` for implementation notes
-- **Local docs**: Check `local/` for session-specific documentation
-
-## Future Development Areas
-
-### Potential Enhancements
-1. **Validation**: Integration with pydantic for advanced validation
-2. **Subcommands**: Support for Click-style command groups
-3. **Shell Completion**: Bash/zsh autocomplete generation
-4. **Config Formats**: Support for additional formats (INI, XML)
-5. **IDE Integration**: Language server protocol support
-6. **Performance**: Lazy field analysis, caching
-7. **Auto-detection**: Automatic `default_factory=list` for append fields
-
-### Maintenance Priorities
-1. **Compatibility**: Maintain Python 3.8+ support until EOL
-2. **Stability**: No breaking changes in 1.x series
-3. **Quality**: Keep test coverage >90%
-4. **Documentation**: Keep examples and docs current
-5. **Security**: Regular dependency updates, security scans
+# dataclass-args - Agent Bootstrap
+
+**Purpose**: Zero-boilerplate CLI generation from Python dataclasses with advanced type support  
+**Type**: Library  
+**Language**: Python 3.8+  
+**Repository**: https://github.com/bassmanitram/dataclass-args
 
 ---
 
-**Last Updated**: 2024-12-XX
-**Bootstrap Version**: 1.1
-**For**: dataclass-args v1.3.0
-**Status**: Release ready, pending git commit
+## What You Need to Know
+
+**This is**: A library that auto-generates argparse-based CLIs from dataclass definitions. You define a dataclass with typed fields and optional metadata annotations (`cli_short`, `cli_append`, etc.), call `build_config()`, and get a fully functional CLI with help text, type validation, and configuration file merging. Eliminates argparse boilerplate.
+
+**Architecture in one sentence**: Dataclass introspection → Field analysis → ArgumentParser generation → Parsing → Configuration merging → Dataclass instantiation.
+
+**The ONE constraint that must not be violated**: At most ONE positional argument can use `nargs='*'` or `'+'`, and it MUST be the last positional - this is an argparse limitation, not negotiable.
+
+---
+
+## Mental Model
+
+- Think of this as **dataclass-to-CLI compiler** - your dataclass definition IS the CLI specification
+- Field metadata (`cli_short`, `cli_choices`, etc.) controls CLI behavior - these are **declarative annotations**
+- Configuration merging follows **precedence layers**: base_configs → --config file → CLI args (later wins)
+- Type system drives parsing - `List[str]` becomes multi-value arg, `bool` becomes flag, `Optional[T]` becomes optional
+- Positional args are **greedy** - they consume remaining arguments, which is why only ONE list positional allowed
+
+---
+
+## Codebase Organization
+
+```
+dataclass_args/
+├── builder.py         # GenericConfigBuilder - core CLI generation logic
+├── annotations.py     # Field metadata: cli_short(), cli_append(), cli_choices(), etc.
+├── file_loading.py    # @file.txt syntax support for string fields
+├── utils.py           # load_structured_file() - YAML/JSON/TOML loading
+├── exceptions.py      # ConfigBuilderError and subclasses
+└── tests/             # Comprehensive test suite (one file per feature)
+```
+
+**Navigation Guide**:
+
+| When you need to... | Start here | Why |
+|---------------------|------------|-----|
+| Add new annotation | `annotations.py` → create `cli_*()` function | All annotations defined here |
+| Modify argument generation | `builder.py` → `_add_field_argument()` | Where field → argparse arg translation happens |
+| Change merge behavior | `builder.py` → `build_config()` → merge logic | Configuration hierarchy handled here |
+| Fix type handling | `builder.py` → `_get_field_type_info()` | Type introspection and parsing |
+| Add file format support | `utils.py` → `load_structured_file()` | Format dispatch logic |
+
+**Entry points**:
+- Main execution: `build_config(MyDataclass, ['arg1', 'arg2'])` - Returns dataclass instance
+- Tests: `tests/test_*.py` - One file per feature area
+- Examples: `examples/` - Working demonstrations of each feature
+
+---
+
+## Critical Invariants
+
+These rules MUST be maintained:
+
+1. **One greedy positional maximum**: At most one positional with `nargs` in `['*', '+']`, must be last
+   - **Why**: argparse limitation - multiple greedy positionals create ambiguous CLI
+   - **Breaks if violated**: ArgumentParser raises error at construction time
+   - **Enforced by**: `_validate_positional_arguments()` called during builder init
+
+2. **Append fields must have default_factory=list**: `cli_append()` requires list type with factory
+   - **Why**: argparse `action='append'` appends to existing list, needs empty list to start
+   - **Breaks if violated**: First append creates new list, subsequent appends fail
+   - **Enforced by**: Documentation, examples, tests demonstrate pattern (not runtime enforced)
+
+3. **nargs and min_args/max_args are mutually exclusive**: Can't specify both for `cli_append()`
+   - **Why**: They solve same problem differently - nargs is exact count, min/max is range
+   - **Breaks if violated**: `ValueError` raised in `cli_append()` validation
+   - **Enforced by**: Validation in `annotations.py` at annotation creation time
+
+---
+
+## Non-Obvious Behaviors & Gotchas
+
+Things that surprise people:
+
+1. **List fields without cli_append accumulate from single flag**:
+   - **Why it's this way**: `--files a b c` puts all three in list (argparse default)
+   - **Common mistake**: Expecting `--files a --files b` to work (it doesn't without cli_append)
+   - **Correct approach**: Use `cli_append()` if you want `--files a --files b` pattern
+
+2. **Boolean fields from base_configs work differently than CLI**:
+   - **Why**: argparse uses `SUPPRESS` to distinguish "not specified" from "specified as False"
+   - **Watch out for**: `--flag` sets True, omitting flag preserves base_configs value (doesn't default to False)
+   - **Pattern**: This enables base_configs to provide booleans that CLI can override
+
+3. **File loading with @syntax only works for string fields**:
+   - **Why**: Only string fields support `@file.txt` - type system doesn't allow `@file.txt` for int/bool
+   - **Pattern**: Use `cli_file_loadable()` annotation, then `--prompt @~/prompt.txt`
+   - **Gotcha**: Tilde expansion happens automatically, path is relative to CWD
+
+4. **combine_annotations merges metadata, not creates union**:
+   - **Why**: Single field needs multiple features (short + choices + help)
+   - **Watch out for**: Order doesn't matter (all metadata merged into field)
+   - **Correct approach**: `combine_annotations(cli_short('r'), cli_choices(['a','b']), cli_help('text'))`
+
+---
+
+## Architecture Decisions
+
+**Why use dataclass metadata instead of custom decorators?**
+- **Trade-off**: Metadata is less visible but preserves dataclass semantics (dataclasses.field)
+- **Alternative considered**: Decorator like `@cli_short('n')` on field
+- **Why metadata wins**: Dataclass remains valid dataclass, tools (IDEs, type checkers) understand it, no magic decorators
+
+**Why support both base_configs dict and file?**
+- **Trade-off**: More complex merging logic but maximizes flexibility
+- **Alternative considered**: File only, or dict only
+- **Why both**: Dict for programmatic config (tests, generated), file for static config (deployment)
+
+**Why allow list of overrides instead of single override?**
+- **Trade-off**: More complex precedence but enables layered config (base → environment → local)
+- **Alternative considered**: Single override source
+- **Implications**: Must document precedence clearly, list order matters (later wins)
+
+---
+
+## Key Patterns & Abstractions
+
+**Pattern 1: Metadata-Driven Generation**
+- **Used for**: All field customization (short options, choices, positional, append, etc.)
+- **Structure**: Annotation functions return `field(metadata={...})`, builder inspects metadata
+- **Examples in code**: `cli_short()`, `cli_append()`, `cli_choices()` - all return field with metadata
+
+**Pattern 2: Type-Directed Parsing**
+- **Used for**: Converting strings to target types (List[int], Optional[str], Path, etc.)
+- **Structure**: Introspect type hints, generate appropriate argparse `type=` and `nargs=`
+- **Why**: Dataclass type is source of truth, argparse must match
+
+**Anti-pattern to avoid: Using list literal as default**
+- **Don't do this**: `files: List[str] = []` (mutable default)
+- **Why it fails**: All instances share same list object, modifications leak across instances
+- **Instead**: `files: List[str] = field(default_factory=list)`
+
+---
+
+## State & Data Flow
+
+**State management**:
+- **Persistent state**: Configuration files (YAML/JSON/TOML) on filesystem
+- **Runtime state**: GenericConfigBuilder holds field analysis, ArgumentParser instance
+- **No state here**: Annotation functions are pure (just return field metadata)
+
+**Data flow**:
+```
+Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
+                                                              ↓
+                                                    ArgumentParser.add_argument()
+                                                              ↓
+        Command-line args → ArgumentParser.parse_args() → Namespace
+                                                              ↓
+                    base_configs → Merge → --config file → Merge → CLI args → Merge
+                                                              ↓
+                                                    Dataclass(**merged_dict)
+```
+
+**Critical paths**: Type hint extraction must happen before argument addition - argparse needs type info to generate correct parser.
+
+---
+
+## Integration Points
+
+**This project depends on** (upstream):
+- **typing-extensions**: Backport of typing features, tightly coupled (enables Python 3.8 support)
+- **PyYAML** (optional): YAML loading, loosely coupled (via utils.py)
+- **tomli** (optional, Python <3.11): TOML loading, loosely coupled
+
+**Projects that depend on this** (downstream):
+- **strands-agent-factory**: Uses dataclass-args for CLI scripts (chatbot, a2a-server)
+- **yacba**: Uses dataclass-args for configuration CLI generation
+- **Your CLI applications**: Configuration and argument parsing
+
+**Related projects** (siblings):
+- **profile-config**: File-based config vs dataclass-args' CLI args - often used together
+- **envlog**: Environment-based config, complementary domain
+
+---
+
+## Configuration Philosophy
+
+**What's configurable**: Field behavior via annotations, merge strategy via base_configs, precedence via order
+
+**What's hardcoded**:
+- ArgumentParser as underlying engine
+- Dataclass field introspection approach
+- Type-to-argparse mapping rules
+
+**The trap**: Trying to use `nargs='*'` on multiple positional arguments. Argparse can't parse ambiguous CLIs like `cmd pos1_val pos2_val_or_pos1_val`. Only ONE greedy positional allowed, must be last.
+
+---
+
+## Testing Strategy
+
+**What we test**:
+- **Annotation behavior**: Each annotation (cli_short, cli_append, etc.) has dedicated test file
+- **Type handling**: Lists, Dicts, Optional, Path, nested types
+- **Merge behavior**: base_configs precedence, file loading, override order
+- **Edge cases**: Empty configs, missing fields, type mismatches
+
+**What we don't test**:
+- **argparse internals**: Trust stdlib works
+- **Dataclass mechanics**: Trust Python's dataclasses module
+
+**Test organization**: One test file per feature (test_cli_short.py, test_cli_append.py, etc.). Each test creates dataclass, generates CLI, tests parsing.
+
+**Mocking strategy**: No mocking - use real dataclasses, real argparse, real file I/O with tempfiles. More realistic, easier to debug.
+
+---
+
+## Common Problems & Diagnostic Paths
+
+**Symptom**: "Positional list argument must be last" error
+- **Most likely cause**: Multiple positional arguments with `nargs='*'` or `'+'`
+- **Check**: Count positional fields in dataclass - only one can be greedy
+- **Fix**: Make additional lists optional with flags: `files: List[str] = cli_short('f', default_factory=list)`
+
+**Symptom**: Append not accumulating values across multiple flag uses
+- **Likely cause**: Field is `List[str]` without `cli_append()` annotation
+- **Diagnostic**: Check if field has `cli_append()` - regular List fields take all values from single flag
+- **Solution**: Add `cli_append()` annotation: `tags: List[str] = cli_append(default_factory=list)`
+
+**Symptom**: Boolean from base_configs not applying
+- **Why it happens**: Fixed in v1.2.2 - earlier versions had bug
+- **Diagnostic**: Check version with `pip show dataclass-args`
+- **Solution**: Upgrade to v1.2.2+
+
+**Symptom**: min_args/max_args validation not working
+- **Why it happens**: Feature added in v1.3.0
+- **Diagnostic**: Check if using both nargs and min/max (mutually exclusive)
+- **Solution**: Use `cli_append(min_args=X, max_args=Y)` without nargs parameter
+
+---
+
+## Modification Patterns
+
+**To add new annotation** (e.g., `cli_required()`):
+1. Create function in `annotations.py` → `cli_required(**kwargs)` returning `field(metadata={...})`
+2. Add helper `is_cli_required(field_info)` and `get_cli_required_value(field_info)`
+3. Update `builder.py` → `_add_field_argument()` to check metadata and apply to argparse
+4. Add test file `tests/test_cli_required.py` with comprehensive cases
+5. Add example in `examples/cli_required_example.py`
+
+**To add new type support** (e.g., Decimal):
+1. Update `builder.py` → `_get_field_type_info()` to detect Decimal type
+2. Add conversion logic (argparse `type=Decimal` or custom converter)
+3. Add tests in `tests/test_builder_advanced.py` or new file
+4. Document in README.md type support section
+
+**To fix precedence issue** (e.g., CLI args not overriding base_configs):
+1. Check `builder.py` → `build_config()` merge logic - order matters
+2. Verify argparse isn't using `set_defaults()` (should use `SUPPRESS` for booleans)
+3. Add test demonstrating correct precedence
+4. Fix merge order or default handling
+
+---
+
+## When to Update This Document
+
+Update this bootstrap when:
+- [x] New annotation type added (extends metadata system, documents pattern)
+- [x] Merge strategy fundamentally changes (precedence rules)
+- [x] Type system handling changes (new type inspection approach)
+- [x] Configuration philosophy changes (e.g., support config hierarchy like profile-config)
+
+Don't update for:
+- ❌ Individual annotation additions (follow existing pattern)
+- ❌ Type support additions (extend type handling)
+- ❌ Bug fixes in parsing or merging
+- ❌ Test additions
+- ❌ Example additions
+
+---
+
+**Last Updated**: 2025-12-03  
+**Last Architectural Change**: v1.3.0 - Added min_args/max_args to cli_append() for flexible validation
