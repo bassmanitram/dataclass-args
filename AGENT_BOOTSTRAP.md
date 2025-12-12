@@ -1,15 +1,15 @@
 # dataclass-args - Agent Bootstrap
 
-**Purpose**: Zero-boilerplate CLI generation from Python dataclasses with advanced type support  
-**Type**: Library  
-**Language**: Python 3.8+  
+**Purpose**: Zero-boilerplate CLI generation from Python dataclasses with advanced type support
+**Type**: Library
+**Language**: Python 3.8+
 **Repository**: https://github.com/bassmanitram/dataclass-args
 
 ---
 
 ## What You Need to Know
 
-**This is**: A library that auto-generates argparse-based CLIs from dataclass definitions. You define a dataclass with typed fields and optional metadata annotations (`cli_short`, `cli_append`, etc.), call `build_config()`, and get a fully functional CLI with help text, type validation, and configuration file merging. Eliminates argparse boilerplate.
+**This is**: A library that auto-generates argparse-based CLIs from dataclass definitions. You define a dataclass with typed fields and optional metadata annotations (`cli_short`, `cli_append`, `cli_nested`, etc.), call `build_config()`, and get a fully functional CLI with help text, type validation, and configuration file merging. Eliminates argparse boilerplate.
 
 **Architecture in one sentence**: Dataclass introspection → Field analysis → ArgumentParser generation → Parsing → Configuration merging → Dataclass instantiation.
 
@@ -20,10 +20,11 @@
 ## Mental Model
 
 - Think of this as **dataclass-to-CLI compiler** - your dataclass definition IS the CLI specification
-- Field metadata (`cli_short`, `cli_choices`, etc.) controls CLI behavior - these are **declarative annotations**
+- Field metadata (`cli_short`, `cli_choices`, `cli_nested`, etc.) controls CLI behavior - these are **declarative annotations**
 - Configuration merging follows **precedence layers**: base_configs → --config file → CLI args (later wins)
 - Type system drives parsing - `List[str]` becomes multi-value arg, `bool` becomes flag, `Optional[T]` becomes optional
 - Positional args are **greedy** - they consume remaining arguments, which is why only ONE list positional allowed
+- **Nested dataclasses flatten to CLI** - `cli_nested()` expands nested fields with configurable prefixes
 
 ---
 
@@ -32,7 +33,7 @@
 ```
 dataclass_args/
 ├── builder.py         # GenericConfigBuilder - core CLI generation logic
-├── annotations.py     # Field metadata: cli_short(), cli_append(), cli_choices(), etc.
+├── annotations.py     # Field metadata: cli_short(), cli_append(), cli_nested(), etc.
 ├── file_loading.py    # @file.txt syntax support for string fields
 ├── utils.py           # load_structured_file() - YAML/JSON/TOML loading
 ├── exceptions.py      # ConfigBuilderError and subclasses
@@ -48,6 +49,7 @@ dataclass_args/
 | Change merge behavior | `builder.py` → `build_config()` → merge logic | Configuration hierarchy handled here |
 | Fix type handling | `builder.py` → `_get_field_type_info()` | Type introspection and parsing |
 | Add file format support | `utils.py` → `load_structured_file()` | Format dispatch logic |
+| Handle nested dataclasses | `builder.py` → `_flatten_nested_fields()` | Nested field flattening logic |
 
 **Entry points**:
 - Main execution: `build_config(MyDataclass, ['arg1', 'arg2'])` - Returns dataclass instance
@@ -75,6 +77,11 @@ These rules MUST be maintained:
    - **Breaks if violated**: `ValueError` raised in `cli_append()` validation
    - **Enforced by**: Validation in `annotations.py` at annotation creation time
 
+4. **Nested field collision detection**: No duplicate CLI names from flattened nested fields
+   - **Why**: Ambiguous which field gets the value (e.g., `app.name` vs `db.name` both become `--name`)
+   - **Breaks if violated**: `ConfigBuilderError` with collision details
+   - **Enforced by**: `_check_cli_name_collisions()` in builder init
+
 ---
 
 ## Non-Obvious Behaviors & Gotchas
@@ -101,6 +108,16 @@ Things that surprise people:
    - **Watch out for**: Order doesn't matter (all metadata merged into field)
    - **Correct approach**: `combine_annotations(cli_short('r'), cli_choices(['a','b']), cli_help('text'))`
 
+5. **Short options disabled for nested fields with prefix** (v1.4.0):
+   - **Why**: Prevents ambiguity - `--db-host` is clear, `-d` could be many things
+   - **Pattern**: Short options only work when `prefix=""`  (flat namespace)
+   - **Gotcha**: Top-level fields still get short options, just not nested ones with prefix
+
+6. **Auto prefix uses field name** (v1.4.0):
+   - **Why**: `cli_nested()` without prefix uses field name as prefix
+   - **Example**: `db: DbConfig = cli_nested()` → fields become `--db-name`, `--db-host`
+   - **Override**: Use `prefix="custom"` or `prefix=""` (flat) to control
+
 ---
 
 ## Architecture Decisions
@@ -120,19 +137,29 @@ Things that surprise people:
 - **Alternative considered**: Single override source
 - **Implications**: Must document precedence clearly, list order matters (later wins)
 
+**Why flatten nested dataclasses instead of subparsers?** (v1.4.0)
+- **Trade-off**: Flatter CLI namespace vs nested structure
+- **Alternative considered**: argparse subparsers (`cmd db --host localhost`)
+- **Why flatten**: Simpler mental model, all flags at same level, config files map directly to CLI
+
 ---
 
 ## Key Patterns & Abstractions
 
 **Pattern 1: Metadata-Driven Generation**
-- **Used for**: All field customization (short options, choices, positional, append, etc.)
+- **Used for**: All field customization (short options, choices, positional, append, nested, etc.)
 - **Structure**: Annotation functions return `field(metadata={...})`, builder inspects metadata
-- **Examples in code**: `cli_short()`, `cli_append()`, `cli_choices()` - all return field with metadata
+- **Examples in code**: `cli_short()`, `cli_append()`, `cli_nested()` - all return field with metadata
 
 **Pattern 2: Type-Directed Parsing**
 - **Used for**: Converting strings to target types (List[int], Optional[str], Path, etc.)
 - **Structure**: Introspect type hints, generate appropriate argparse `type=` and `nargs=`
 - **Why**: Dataclass type is source of truth, argparse must match
+
+**Pattern 3: Recursive Field Flattening** (v1.4.0)
+- **Used for**: Expanding nested dataclass fields into flat CLI arguments
+- **Structure**: Detect nested dataclass via `cli_nested()`, recursively extract fields, add prefix
+- **Why**: Enables hierarchical config without complex CLI syntax
 
 **Anti-pattern to avoid: Using list literal as default**
 - **Don't do this**: `files: List[str] = []` (mutable default)
@@ -145,12 +172,14 @@ Things that surprise people:
 
 **State management**:
 - **Persistent state**: Configuration files (YAML/JSON/TOML) on filesystem
-- **Runtime state**: GenericConfigBuilder holds field analysis, ArgumentParser instance
+- **Runtime state**: GenericConfigBuilder holds field analysis, ArgumentParser instance, flattened field map
 - **No state here**: Annotation functions are pure (just return field metadata)
 
 **Data flow**:
 ```
 Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
+                                                              ↓
+                                                    Flatten Nested Fields (v1.4.0)
                                                               ↓
                                                     ArgumentParser.add_argument()
                                                               ↓
@@ -158,10 +187,14 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
                                                               ↓
                     base_configs → Merge → --config file → Merge → CLI args → Merge
                                                               ↓
+                                                    Reconstruct Nested Structure
+                                                              ↓
                                                     Dataclass(**merged_dict)
 ```
 
-**Critical paths**: Type hint extraction must happen before argument addition - argparse needs type info to generate correct parser.
+**Critical paths**:
+- Type hint extraction must happen before argument addition - argparse needs type info
+- Nested field flattening must check for collisions before adding arguments
 
 ---
 
@@ -185,12 +218,13 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 
 ## Configuration Philosophy
 
-**What's configurable**: Field behavior via annotations, merge strategy via base_configs, precedence via order
+**What's configurable**: Field behavior via annotations, merge strategy via base_configs, precedence via order, nested structure via cli_nested prefix modes
 
 **What's hardcoded**:
 - ArgumentParser as underlying engine
 - Dataclass field introspection approach
 - Type-to-argparse mapping rules
+- Nested field flattening strategy
 
 **The trap**: Trying to use `nargs='*'` on multiple positional arguments. Argparse can't parse ambiguous CLIs like `cmd pos1_val pos2_val_or_pos1_val`. Only ONE greedy positional allowed, must be last.
 
@@ -199,16 +233,17 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 ## Testing Strategy
 
 **What we test**:
-- **Annotation behavior**: Each annotation (cli_short, cli_append, etc.) has dedicated test file
+- **Annotation behavior**: Each annotation (cli_short, cli_append, cli_nested, etc.) has dedicated test file
 - **Type handling**: Lists, Dicts, Optional, Path, nested types
 - **Merge behavior**: base_configs precedence, file loading, override order
+- **Nested dataclasses**: Prefix modes, collision detection, config file merging (v1.4.0)
 - **Edge cases**: Empty configs, missing fields, type mismatches
 
 **What we don't test**:
 - **argparse internals**: Trust stdlib works
 - **Dataclass mechanics**: Trust Python's dataclasses module
 
-**Test organization**: One test file per feature (test_cli_short.py, test_cli_append.py, etc.). Each test creates dataclass, generates CLI, tests parsing.
+**Test organization**: One test file per feature (test_cli_short.py, test_cli_append.py, test_cli_nested.py, etc.). Each test creates dataclass, generates CLI, tests parsing.
 
 **Mocking strategy**: No mocking - use real dataclasses, real argparse, real file I/O with tempfiles. More realistic, easier to debug.
 
@@ -236,6 +271,16 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 - **Diagnostic**: Check if using both nargs and min/max (mutually exclusive)
 - **Solution**: Use `cli_append(min_args=X, max_args=Y)` without nargs parameter
 
+**Symptom**: "CLI name collision detected" error (v1.4.0)
+- **Likely cause**: Multiple nested fields flatten to same CLI name (e.g., `--name` from both app and db)
+- **Diagnostic**: Error message shows which fields collide
+- **Solution**: Use custom prefix: `db: DbConfig = cli_nested(prefix="database")` → `--database-name`
+
+**Symptom**: Short options not working for nested fields (v1.4.0)
+- **Why it happens**: Short options disabled when prefix is set (by design)
+- **Diagnostic**: Check if nested field uses `prefix=""` (flat namespace)
+- **Solution**: Use `prefix=""` to enable short options, or accept long options only
+
 ---
 
 ## Modification Patterns
@@ -259,6 +304,14 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 3. Add test demonstrating correct precedence
 4. Fix merge order or default handling
 
+**To add nested dataclass support** (v1.4.0 - completed):
+1. Add `cli_nested()` annotation in `annotations.py` with prefix parameter
+2. Implement `_flatten_nested_fields()` in `builder.py` to recursively extract fields
+3. Add collision detection in `_check_cli_name_collisions()`
+4. Handle nested reconstruction in `build_config()` merge logic
+5. Add comprehensive tests in `tests/test_cli_nested.py`
+6. Add examples demonstrating all prefix modes
+
 ---
 
 ## When to Update This Document
@@ -268,6 +321,7 @@ Update this bootstrap when:
 - [x] Merge strategy fundamentally changes (precedence rules)
 - [x] Type system handling changes (new type inspection approach)
 - [x] Configuration philosophy changes (e.g., support config hierarchy like profile-config)
+- [x] **Nested dataclass support added** (v1.4.0 - architectural change)
 
 Don't update for:
 - ❌ Individual annotation additions (follow existing pattern)
@@ -278,5 +332,5 @@ Don't update for:
 
 ---
 
-**Last Updated**: 2025-12-03  
-**Last Architectural Change**: v1.3.0 - Added min_args/max_args to cli_append() for flexible validation
+**Last Updated**: 2025-12-12
+**Last Architectural Change**: v1.4.0 - Added `cli_nested()` for hierarchical configuration with automatic CLI flattening, three prefix modes (custom, none, auto), collision detection, and smart short option handling

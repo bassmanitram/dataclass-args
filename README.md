@@ -555,10 +555,10 @@ class CacheConfig:
 class AppConfig:
     app_name: str = "myapp"
     debug: bool = False
-    
+
     # Nested with custom prefix
     database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
-    
+
     # Nested with custom prefix
     cache: CacheConfig = cli_nested(prefix="cache", default_factory=CacheConfig)
 
@@ -747,32 +747,32 @@ class LoggingConfig:
 @dataclass
 class AppConfig:
     """Application configuration with nested sections."""
-    
+
     # Top-level settings
     app_name: str = combine_annotations(
         cli_short("n"),
         cli_help("Application name"),
         default="myapp"
     )
-    
+
     debug: bool = combine_annotations(
         cli_short("d"),
         cli_help("Enable debug mode"),
         default=False
     )
-    
+
     workers: int = combine_annotations(
         cli_short("w"),
         cli_help("Number of worker threads"),
         default=4
     )
-    
+
     # Nested configurations
     database: DatabaseConfig = cli_nested(
         prefix="db",
         default_factory=DatabaseConfig
     )
-    
+
     logging: LoggingConfig = cli_nested(
         prefix="log",
         default_factory=LoggingConfig
@@ -780,7 +780,7 @@ class AppConfig:
 
 if __name__ == "__main__":
     config = build_config(AppConfig)
-    
+
     print(f"App: {config.app_name}")
     print(f"Database: {config.database.host}:{config.database.port}/{config.database.database}")
     print(f"Logging: {config.logging.level} -> {config.logging.file}")
@@ -1465,7 +1465,7 @@ class Config:
 
     # File-loadable
     config_text: str = cli_file_loadable(default="")
-    
+
     # Nested dataclass
     database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
 

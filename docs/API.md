@@ -391,7 +391,7 @@ class DatabaseConfig:
 @dataclass
 class AppConfig:
     app_name: str = "myapp"
-    
+
     # Custom prefix
     database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
 
@@ -431,7 +431,7 @@ class Config:
     # With prefix: -h is ignored (no conflict)
     server: ServerConfig = cli_nested(prefix="srv", default_factory=ServerConfig)
     # CLI: --srv-host (no -h)
-    
+
     # No prefix: -h is enabled
     server2: ServerConfig = cli_nested(prefix="", default_factory=ServerConfig)
     # CLI: -h, --host (short option works)
