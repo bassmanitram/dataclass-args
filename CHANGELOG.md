@@ -1,3 +1,35 @@
+## [Unreleased]
+
+### Added
+- **Property override support for dict fields in nested dataclasses**
+  - Dict fields inside nested dataclasses now get override arguments
+  - Override argument format: `--prefix-abbreviation key.path:value`
+  - Examples:
+    - `model_config: Dict[str, Any]` in nested field with `prefix="agent-"` → `--agent-mc temperature:0.9`
+    - Same with `prefix=""` → `--mc temperature:0.9`
+  - Supports dotted path notation: `--agent-mc nested.key.path:value`
+  - Fully compatible with auto-prefix mode
+  - Enables CLI override of nested dict fields without full file replacement
+
+### Examples
+- New test script: `local/test_dict_override_in_nested.py` - Functional demonstration
+
+### Tests
+- Added 7 new tests in `tests/test_nested_dict_override.py`
+  - Override argument generation with prefix
+  - Override argument generation without prefix  
+  - Override parsing with prefix
+  - Override parsing without prefix
+  - Help text verification
+  - Multiple dict fields
+  - Auto-prefix support
+- All 348 tests passing (341 existing + 7 new)
+
+### Quality
+- 100% backward compatible - no breaking changes
+- Minimal code change (25 lines in `builder.py`)
+- All existing functionality preserved
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

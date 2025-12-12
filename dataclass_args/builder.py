@@ -683,8 +683,32 @@ class GenericConfigBuilder:
             )
             parser.add_argument(*arg_names, type=str, help=dict_help)
 
-            # For nested dict fields, skip override arguments for now
-            # (complex feature - can add later if needed)
+            # Add override argument for dict fields in nested dataclasses
+            # Calculate override name with same prefix logic as main argument
+            if prefix == "":
+                # No prefix - use override_name from info directly
+                override_name = info.get("override_name", "")
+            else:
+                # With prefix - apply prefix to the override abbreviation
+                # info["override_name"] is like "--mc" (abbreviation from nested field)
+                base_override = info.get("override_name", "").lstrip("--")
+                if base_override:
+                    override_name = f"--{prefix}{base_override}"
+                else:
+                    # Fallback shouldn't happen, but handle it
+                    override_name = f"--{prefix}override"
+
+            if override_name:
+                override_help = (
+                    f"{help_text} property override (format: key.path:value)"
+                    if help_text
+                    else "property override (format: key.path:value)"
+                )
+                parser.add_argument(
+                    override_name,
+                    action="append",
+                    help=override_help,
+                )
         else:
             # Simple scalar parameters
             arg_type = self._get_argument_type(info["type"])

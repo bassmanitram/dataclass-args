@@ -333,4 +333,4 @@ Don't update for:
 ---
 
 **Last Updated**: 2025-12-12
-**Last Architectural Change**: v1.4.0 - Added `cli_nested()` for hierarchical configuration with automatic CLI flattening, three prefix modes (custom, none, auto), collision detection, and smart short option handling
+**Last Architectural Change**: v1.4.1 - Added property override support for dict fields in nested dataclasses (completes cli_nested feature)
