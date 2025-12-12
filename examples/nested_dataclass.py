@@ -4,7 +4,40 @@ Example: Nested Dataclass Configuration
 
 Demonstrates using cli_nested() to organize configuration into nested dataclasses.
 This helps structure complex configurations while keeping the CLI clean.
+
+Usage Examples:
+
+1. Use defaults:
+   $ python nested_dataclass.py
+
+2. Override application settings:
+   $ python nested_dataclass.py --app-name "ProductionApp" --workers 8 --debug
+
+3. Override database settings (note the 'db-' prefix):
+   $ python nested_dataclass.py --db-host prod.example.com --db-port 3306 --db-database prod_db
+
+4. Override logging settings (note the 'log-' prefix):
+   $ python nested_dataclass.py --log-level DEBUG --log-file /var/log/app.log
+
+5. Mix and match:
+   $ python nested_dataclass.py \\
+       --app-name "MyService" \\
+       --db-host db.example.com \\
+       --db-database myservice_db \\
+       --log-level WARNING \\
+       --workers 16
+
+6. Get help (shows all options including nested):
+   $ python nested_dataclass.py --help
+
+Benefits of nested dataclasses:
+- Organized, hierarchical configuration structure
+- Clear separation of concerns (database, logging, etc.)
+- Prefixes prevent naming conflicts
+- Type safety within each nested dataclass
+- Reusable configuration components
 """
+
 
 from dataclasses import dataclass
 
@@ -72,38 +105,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-"""
-Usage Examples:
-
-1. Use defaults:
-   $ python nested_dataclass.py
-
-2. Override application settings:
-   $ python nested_dataclass.py --app-name "ProductionApp" --workers 8 --debug
-
-3. Override database settings (note the 'db-' prefix):
-   $ python nested_dataclass.py --db-host prod.example.com --db-port 3306 --db-database prod_db
-
-4. Override logging settings (note the 'log-' prefix):
-   $ python nested_dataclass.py --log-level DEBUG --log-file /var/log/app.log
-
-5. Mix and match:
-   $ python nested_dataclass.py \\
-       --app-name "MyService" \\
-       --db-host db.example.com \\
-       --db-database myservice_db \\
-       --log-level WARNING \\
-       --workers 16
-
-6. Get help (shows all options including nested):
-   $ python nested_dataclass.py --help
-
-Benefits of nested dataclasses:
-- Organized, hierarchical configuration structure
-- Clear separation of concerns (database, logging, etc.)
-- Prefixes prevent naming conflicts
-- Type safety within each nested dataclass
-- Reusable configuration components
-"""

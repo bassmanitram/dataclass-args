@@ -6,6 +6,69 @@ Demonstrates how short options work with nested dataclasses:
 - With prefix: Short options are NOT supported (prevents conflicts)
 - No prefix (prefix=""): Short options ARE supported
 - Collision detection for no-prefix nested fields
+
+Usage Examples:
+
+1. Using short options for top-level and nested (no prefix) fields:
+   $ python nested_short_options.py -a "MyApp" -w 8 -u john -p pass123
+
+   Output:
+     Application:
+       Name:    MyApp
+       Workers: 8
+     Credentials (no prefix, short options enabled):
+       Username: john
+       Password: pass123
+
+2. Database fields must use long form (have prefix):
+   $ python nested_short_options.py --db-host prod.db.com --db-port 3306
+
+   Note: Cannot use -h or -p for database because it has prefix="db"
+
+3. Mix short and long options:
+   $ python nested_short_options.py -a "Service" -u admin --db-host prod.db.com
+
+4. Show help (see which fields have short options):
+   $ python nested_short_options.py --help
+
+   You'll see:
+     -a APP_NAME, --app-name APP_NAME       (has short option)
+     -w WORKERS, --workers WORKERS           (has short option)
+     -u USERNAME, --username USERNAME        (nested, no prefix - has short option!)
+     -p PASSWORD, --password PASSWORD        (nested, no prefix - has short option!)
+     --db-host DB_HOST                       (nested with prefix - NO short option)
+     --db-port DB_PORT                       (nested with prefix - NO short option)
+
+Key Points:
+
+1. No Prefix = Short Options Enabled
+   When a nested dataclass has prefix="", its fields are completely flattened
+   and their short options work just like regular fields.
+
+2. With Prefix = No Short Options
+   When a nested dataclass has a prefix (prefix="db"), short options are NOT
+   supported for those fields to avoid confusion and conflicts.
+
+3. Collision Detection
+   If you try to use the same short option for multiple fields (including
+   nested fields with no prefix), you'll get a clear error message:
+
+   Example of collision:
+     @dataclass
+     class Config:
+         app_name: str = cli_short("a")
+         nested: Nested = cli_nested(prefix="")  # Nested has field with -a too
+
+   Error:
+     Short option collision detected:
+       -a
+         - app_name (--app-name)
+         - nested.name (--name)
+
+4. Best Practices
+   - Use prefix="" when you want complete flattening with short options
+   - Use prefix="xyz" when you want clear namespacing (no short options)
+   - Be mindful of short option collisions when using prefix=""
 """
 
 from dataclasses import dataclass
@@ -95,73 +158,3 @@ def main():
     print(f"  Host: {config.db.host}")
     print(f"  Port: {config.db.port}")
     print("\n" + "=" * 60)
-
-
-if __name__ == "__main__":
-    main()
-
-
-"""
-Usage Examples:
-
-1. Using short options for top-level and nested (no prefix) fields:
-   $ python nested_short_options.py -a "MyApp" -w 8 -u john -p pass123
-
-   Output:
-     Application:
-       Name:    MyApp
-       Workers: 8
-     Credentials (no prefix, short options enabled):
-       Username: john
-       Password: pass123
-
-2. Database fields must use long form (have prefix):
-   $ python nested_short_options.py --db-host prod.db.com --db-port 3306
-
-   Note: Cannot use -h or -p for database because it has prefix="db"
-
-3. Mix short and long options:
-   $ python nested_short_options.py -a "Service" -u admin --db-host prod.db.com
-
-4. Show help (see which fields have short options):
-   $ python nested_short_options.py --help
-
-   You'll see:
-     -a APP_NAME, --app-name APP_NAME       (has short option)
-     -w WORKERS, --workers WORKERS           (has short option)
-     -u USERNAME, --username USERNAME        (nested, no prefix - has short option!)
-     -p PASSWORD, --password PASSWORD        (nested, no prefix - has short option!)
-     --db-host DB_HOST                       (nested with prefix - NO short option)
-     --db-port DB_PORT                       (nested with prefix - NO short option)
-
-Key Points:
-
-1. No Prefix = Short Options Enabled
-   When a nested dataclass has prefix="", its fields are completely flattened
-   and their short options work just like regular fields.
-
-2. With Prefix = No Short Options
-   When a nested dataclass has a prefix (prefix="db"), short options are NOT
-   supported for those fields to avoid confusion and conflicts.
-
-3. Collision Detection
-   If you try to use the same short option for multiple fields (including
-   nested fields with no prefix), you'll get a clear error message:
-
-   Example of collision:
-     @dataclass
-     class Config:
-         app_name: str = cli_short("a")
-         nested: Nested = cli_nested(prefix="")  # Nested has field with -a too
-
-   Error:
-     Short option collision detected:
-       -a
-         - app_name (--app-name)
-         - nested.name (--name)
-
-4. Best Practices
-   - Use prefix="" when you want complete flattening with short options
-   - Use prefix="xyz" when you want clear namespacing (no short options)
-   - Be mindful of short option collisions when using prefix=""
-"""
