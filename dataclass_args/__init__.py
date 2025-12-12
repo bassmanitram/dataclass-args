@@ -10,6 +10,7 @@ with advanced features including:
 - File-loadable string parameters using @filename syntax
 - Configuration file merging with CLI overrides
 - Hierarchical property overrides for dictionary fields
+- Nested dataclass flattening for complex configurations
 - Comprehensive validation and error handling
 - Automatic help text generation
 
@@ -40,6 +41,22 @@ Advanced Usage:
 
     # Usage: -n MyApp --environment prod -r us-west --message @file.txt
     config = build_config(Config)
+
+Nested Dataclass Usage:
+    from dataclass_args import cli_nested
+
+    @dataclass
+    class WrapperConfig:
+        retry_count: int = 3
+        timeout: int = 30
+
+    @dataclass
+    class AppConfig:
+        app_name: str
+        wrapper: WrapperConfig = cli_nested(prefix="w")
+
+    # Usage: --app-name MyApp --w-retry-count 5 --w-timeout 60
+    config = build_config(AppConfig)
 """
 
 from .annotations import (
@@ -49,6 +66,7 @@ from .annotations import (
     cli_file_loadable,
     cli_help,
     cli_include,
+    cli_nested,
     cli_positional,
     cli_short,
     combine_annotations,
@@ -57,6 +75,7 @@ from .annotations import (
     get_cli_append_min_args,
     get_cli_append_nargs,
     get_cli_choices,
+    get_cli_nested_prefix,
     get_cli_positional_metavar,
     get_cli_positional_nargs,
     get_cli_short,
@@ -64,6 +83,7 @@ from .annotations import (
     is_cli_excluded,
     is_cli_file_loadable,
     is_cli_included,
+    is_cli_nested,
     is_cli_positional,
 )
 from .builder import GenericConfigBuilder, build_config, build_config_from_cli
@@ -71,7 +91,7 @@ from .exceptions import ConfigBuilderError, ConfigurationError, FileLoadingError
 from .file_loading import is_file_loadable_value, load_file_content
 from .utils import load_structured_file
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 __all__ = [
     # Main API
@@ -85,11 +105,13 @@ __all__ = [
     "cli_exclude",
     "cli_include",
     "cli_file_loadable",
+    "cli_nested",
     "cli_positional",
     "cli_append",
     "combine_annotations",
     "get_cli_short",
     "get_cli_choices",
+    "get_cli_nested_prefix",
     "get_cli_positional_nargs",
     "get_cli_positional_metavar",
     "get_cli_append_nargs",
@@ -99,6 +121,7 @@ __all__ = [
     "is_cli_file_loadable",
     "is_cli_excluded",
     "is_cli_included",
+    "is_cli_nested",
     "is_cli_positional",
     "is_cli_append",
     # File loading

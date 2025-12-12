@@ -14,6 +14,7 @@ Generate command-line interfaces from Python dataclasses.
 
 - **[Automatic CLI Generation](#quick-start)** - Generate CLI from dataclass definitions
 - **[Type-Safe Parsing](#type-support)** - Type-aware argument parsing for standard Python types
+- **[Nested Dataclasses](#nested-dataclasses)** - Organize configs hierarchically with automatic flattening
 - **[Positional Arguments](#positional-arguments)** - Support for positional args with `cli_positional()`
 - **[Short Options](#short-options)** - Concise `-n` flags in addition to `--name`
 - **[Boolean Flags](#boolean-flags)** - Proper `--flag` and `--no-flag` boolean handling
@@ -530,6 +531,284 @@ $ python app.py --name "MyApp" --system-prompt "@~/prompts/assistant.txt"
 - `@/absolute/path` → Used as-is
 - `@relative/path` → Relative to current working directory
 
+### Nested Dataclasses
+
+Organize complex configurations into nested dataclasses with automatic CLI flattening. Use `cli_nested()` to create hierarchical configs that are exposed as flat CLI arguments with customizable prefixes.
+
+```python
+from dataclass_args import cli_nested
+
+@dataclass
+class DatabaseConfig:
+    host: str = "localhost"
+    port: int = 5432
+    username: str = "admin"
+    password: str = "secret"
+
+@dataclass
+class CacheConfig:
+    host: str = "localhost"
+    port: int = 6379
+    ttl: int = 3600
+
+@dataclass
+class AppConfig:
+    app_name: str = "myapp"
+    debug: bool = False
+    
+    # Nested with custom prefix
+    database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
+    
+    # Nested with custom prefix
+    cache: CacheConfig = cli_nested(prefix="cache", default_factory=CacheConfig)
+
+config = build_config(AppConfig)
+```
+
+```bash
+# All nested fields are flattened with prefixes
+$ python app.py \
+    --app-name "MyApp" \
+    --db-host prod-db.example.com \
+    --db-port 5432 \
+    --db-username dbuser \
+    --cache-host redis.example.com \
+    --cache-ttl 7200
+
+# Help shows all flattened fields
+$ python app.py --help
+options:
+  --app-name APP_NAME
+  --debug / --no-debug
+  --db-host DB_HOST
+  --db-port DB_PORT
+  --db-username DB_USERNAME
+  --db-password DB_PASSWORD
+  --cache-host CACHE_HOST
+  --cache-port CACHE_PORT
+  --cache-ttl CACHE_TTL
+```
+
+#### Prefix Modes
+
+**Custom Prefix:**
+```python
+database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
+# CLI: --db-host, --db-port, --db-username
+```
+
+**No Prefix (Complete Flattening):**
+```python
+credentials: Credentials = cli_nested(prefix="", default_factory=Credentials)
+# CLI: --username, --password (no prefix)
+```
+
+**Auto Prefix (Uses Field Name):**
+```python
+database: DatabaseConfig = cli_nested(default_factory=DatabaseConfig)
+# CLI: --database-host, --database-port (field name as prefix)
+```
+
+#### Short Options with Nested Fields
+
+Short options behave differently based on the prefix:
+
+**With Prefix** → Short options are **ignored** (prevents conflicts):
+```python
+@dataclass
+class ServerConfig:
+    host: str = cli_short("h", default="localhost")
+    port: int = cli_short("p", default=8080)
+
+@dataclass
+class Config:
+    server: ServerConfig = cli_nested(prefix="srv", default_factory=ServerConfig)
+
+# CLI: --srv-host, --srv-port (no -h or -p for nested fields)
+```
+
+**No Prefix** → Short options are **enabled**:
+```python
+@dataclass
+class Credentials:
+    username: str = cli_short("u", default="admin")
+    password: str = cli_short("p", default="secret")
+
+@dataclass
+class Config:
+    app_name: str = cli_short("a", default="app")
+    creds: Credentials = cli_nested(prefix="", default_factory=Credentials)
+
+# CLI: -a, -u, -p all work! (completely flattened)
+```
+
+```bash
+# Use short options for all fields
+$ python app.py -a MyApp -u john -p secretpass
+```
+
+#### Collision Detection
+
+Automatic collision detection prevents field name and short option conflicts:
+
+**Field Name Collision:**
+```python
+@dataclass
+class Nested:
+    name: str = "nested"
+
+@dataclass
+class Config:
+    name: str = "parent"
+    nested: Nested = cli_nested(prefix="", default_factory=Nested)
+
+# ERROR: Field name collision detected:
+#   --name
+#     - name
+#     - nested.name
+# Solution: Add prefix to nested field or rename
+```
+
+**Short Option Collision:**
+```python
+@dataclass
+class Nested:
+    host: str = cli_short("h", default="nested-host")
+
+@dataclass
+class Config:
+    help_text: str = cli_short("h", default="help")
+    nested: Nested = cli_nested(prefix="", default_factory=Nested)
+
+# ERROR: Short option collision detected:
+#   -h
+#     - help_text (--help-text)
+#     - nested.host (--host)
+# Solution: Use different short options or add prefix
+```
+
+#### Config File Merging with Nested Fields
+
+Nested dataclasses work seamlessly with config files:
+
+**config.yaml:**
+```yaml
+app_name: "ProductionApp"
+database:
+  host: "prod-db.example.com"
+  port: 5432
+  username: "prod_user"
+cache:
+  host: "redis.example.com"
+  ttl: 7200
+```
+
+```python
+config = build_config(AppConfig, args=[
+    '--config', 'config.yaml',
+    '--db-password', 'secret',      # Override specific nested field
+    '--cache-ttl', '3600'            # Override another nested field
+])
+
+# Result:
+# - app_name: "ProductionApp" (from file)
+# - database.host: "prod-db.example.com" (from file)
+# - database.password: "secret" (CLI override)
+# - cache.host: "redis.example.com" (from file)
+# - cache.ttl: 3600 (CLI override)
+```
+
+#### Real-World Example
+
+```python
+from dataclasses import dataclass
+from dataclass_args import build_config, cli_nested, cli_short, cli_help, combine_annotations
+
+@dataclass
+class DatabaseConfig:
+    """Database connection settings."""
+    host: str = cli_help("Database hostname", default="localhost")
+    port: int = cli_help("Database port", default=5432)
+    database: str = cli_help("Database name", default="mydb")
+    username: str = cli_help("Database username", default="admin")
+    password: str = cli_help("Database password", default="")
+
+@dataclass
+class LoggingConfig:
+    """Logging configuration."""
+    level: str = combine_annotations(
+        cli_help("Log level"),
+        cli_choices(["DEBUG", "INFO", "WARNING", "ERROR"]),
+        default="INFO"
+    )
+    file: str = cli_help("Log file path", default="app.log")
+    format: str = cli_help("Log format string", default="%(levelname)s: %(message)s")
+
+@dataclass
+class AppConfig:
+    """Application configuration with nested sections."""
+    
+    # Top-level settings
+    app_name: str = combine_annotations(
+        cli_short("n"),
+        cli_help("Application name"),
+        default="myapp"
+    )
+    
+    debug: bool = combine_annotations(
+        cli_short("d"),
+        cli_help("Enable debug mode"),
+        default=False
+    )
+    
+    workers: int = combine_annotations(
+        cli_short("w"),
+        cli_help("Number of worker threads"),
+        default=4
+    )
+    
+    # Nested configurations
+    database: DatabaseConfig = cli_nested(
+        prefix="db",
+        default_factory=DatabaseConfig
+    )
+    
+    logging: LoggingConfig = cli_nested(
+        prefix="log",
+        default_factory=LoggingConfig
+    )
+
+if __name__ == "__main__":
+    config = build_config(AppConfig)
+    
+    print(f"App: {config.app_name}")
+    print(f"Database: {config.database.host}:{config.database.port}/{config.database.database}")
+    print(f"Logging: {config.logging.level} -> {config.logging.file}")
+```
+
+```bash
+# Production deployment with nested config
+$ python app.py \
+    -n "ProductionApp" \
+    -w 16 \
+    --db-host prod-db.example.com \
+    --db-database prod_db \
+    --db-username prod_user \
+    --log-level WARNING \
+    --log-file /var/log/app.log
+
+# Or load base config and override specific fields
+$ python app.py \
+    --config production.yaml \
+    --db-password "${DB_PASSWORD}" \
+    --log-level DEBUG
+```
+
+**See also:**
+- [`examples/nested_dataclass.py`](examples/nested_dataclass.py) - Complete nested dataclass example
+- [`examples/nested_short_options.py`](examples/nested_short_options.py) - Short options with nested fields
+
+
 # config.yaml
 name: "DefaultApp"
 count: 100
@@ -885,6 +1164,30 @@ input: str = combine_annotations(
 
 **Important:** At most one positional can use `nargs='*'` or `'+'`, and it must be the last positional.
 
+#### `cli_nested(prefix=None, default_factory=None, **kwargs)`
+
+Mark a dataclass field as a nested configuration that should be flattened into CLI arguments.
+
+```python
+# Custom prefix
+database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
+# CLI: --db-host, --db-port
+
+# No prefix (complete flattening)
+credentials: Credentials = cli_nested(prefix="", default_factory=Credentials)
+# CLI: --username, --password
+
+# Auto prefix (uses field name)
+logging: LogConfig = cli_nested(default_factory=LogConfig)
+# CLI: --logging-level, --logging-file
+```
+
+**Important:**
+- Fields with prefixes don't support short options
+- Fields without prefix (prefix="") support short options
+- Automatic collision detection for field names and short options
+- Works seamlessly with config file merging
+
 #### `cli_exclude(**kwargs)`
 
 Exclude fields from CLI argument generation.
@@ -1126,6 +1429,7 @@ from dataclass_args import (
     cli_positional,              # Positional args
     cli_choices,                 # Value validation
     cli_help,                    # Custom help text
+    cli_nested,                  # Nested dataclasses
     cli_exclude,                 # Hide from CLI
     cli_file_loadable,           # @file loading
     combine_annotations,         # Combine features
@@ -1161,6 +1465,9 @@ class Config:
 
     # File-loadable
     config_text: str = cli_file_loadable(default="")
+    
+    # Nested dataclass
+    database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
 
 # Build and use
 config = build_config(Config)

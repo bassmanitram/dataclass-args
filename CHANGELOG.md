@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2025-12-12
+
+### Added
+- **Nested Dataclasses with `cli_nested()`** - Organize complex configurations hierarchically
+  - Automatic flattening of nested dataclass fields into CLI arguments
+  - Three prefix modes:
+    - Custom prefix: `prefix="db"` → `--db-host`, `--db-port`
+    - No prefix: `prefix=""` → `--host`, `--port` (complete flattening)
+    - Auto prefix: `prefix=None` → `--database-host` (uses field name)
+  - Short options support:
+    - With prefix: Short options ignored (prevents conflicts)
+    - Without prefix: Short options enabled (like regular fields)
+  - Automatic collision detection:
+    - Field name collisions detected at initialization
+    - Short option collisions detected at initialization
+    - Clear error messages with actionable solutions
+  - Full integration:
+    - Works with all field types (scalars, lists, dicts, booleans, optionals)
+    - Compatible with all annotations (cli_help, cli_choices, cli_short, etc.)
+    - Config file merging with partial overrides
+    - Preserves non-specified nested field values
+  - Real-world use cases: Database configs, logging configs, service endpoints, credentials
+
+### Examples
+- New example: `examples/nested_dataclass.py` - Basic nested configuration
+- New example: `examples/nested_short_options.py` - Short options with nested fields
+
+### Tests
+- Added 24 comprehensive tests in `tests/test_cli_nested.py`
+  - TestBasicNested - Three prefix modes, partial overrides, multiple nested
+  - TestCollisionDetection - Field name and cross-nested collisions
+  - TestShortOptions - Short options with/without prefix, collision detection
+  - TestConfigFileMerging - Base config, CLI overrides, programmatic configs
+  - TestFieldTypes - Lists, booleans, optionals in nested fields
+  - TestIntegrationWithOtherAnnotations - cli_help, cli_choices, combine_annotations
+  - TestEdgeCases - Empty dataclasses, defaults only, positional args errors
+  - TestBuildConfigHelperFunction - Integration testing
+- All 338 tests passing (314 existing + 24 new)
+- Test coverage maintained
+
+### Quality
+- 100% backward compatible - no breaking changes
+- All existing functionality preserved
+- No regressions in existing tests
+- Clear documentation with examples
+
+### Documentation
+- Updated README.md with "Nested Dataclasses" section
+- Updated docs/API.md with `cli_nested()` API reference
+- Complete examples with real-world scenarios
+- Clear explanation of prefix modes and short option behavior
+
 ## [1.3.0] - 2025-12-04
 
 ### Added

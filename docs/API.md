@@ -357,6 +357,127 @@ class Point:
 
 ---
 
+### `cli_nested(prefix=None, default_factory=None, **kwargs)`
+
+Mark a dataclass field as a nested configuration that should be flattened into CLI arguments.
+
+**Parameters:**
+- `prefix` (Optional[str]): Prefix for nested field CLI names
+  - `None` (default): Auto-prefix using field name (e.g., `"database"` → `--database-host`)
+  - `""` (empty string): No prefix, complete flattening (e.g., `--host`)
+  - Custom string: Use specified prefix (e.g., `"db"` → `--db-host`)
+- `default_factory` (Callable): Factory function to create default instance
+- `**kwargs`: Field parameters (passed to dataclass field)
+
+**Returns:**
+- `Field` with nested dataclass metadata
+
+**Behavior:**
+- **With prefix**: Short options in nested fields are ignored (prevents conflicts)
+- **Without prefix (`prefix=""`)**: Short options in nested fields are enabled
+- **Automatic collision detection**: Field names and short options are validated
+
+**Example:**
+```python
+from dataclasses import dataclass
+from dataclass_args import build_config, cli_nested, cli_short
+
+@dataclass
+class DatabaseConfig:
+    host: str = "localhost"
+    port: int = 5432
+    username: str = "admin"
+
+@dataclass
+class AppConfig:
+    app_name: str = "myapp"
+    
+    # Custom prefix
+    database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
+
+config = build_config(AppConfig)
+# CLI: --app-name MyApp --db-host prod.com --db-port 5432
+```
+
+**Prefix Modes:**
+
+1. **Custom Prefix:**
+```python
+database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
+# CLI: --db-host, --db-port, --db-username
+```
+
+2. **No Prefix (Complete Flattening):**
+```python
+credentials: Credentials = cli_nested(prefix="", default_factory=Credentials)
+# CLI: --username, --password (no prefix)
+# Short options enabled if defined in nested dataclass
+```
+
+3. **Auto Prefix (Field Name):**
+```python
+database: DatabaseConfig = cli_nested(default_factory=DatabaseConfig)
+# CLI: --database-host, --database-port (uses field name)
+```
+
+**Short Options:**
+```python
+@dataclass
+class ServerConfig:
+    host: str = cli_short("h", default="localhost")
+
+@dataclass
+class Config:
+    # With prefix: -h is ignored (no conflict)
+    server: ServerConfig = cli_nested(prefix="srv", default_factory=ServerConfig)
+    # CLI: --srv-host (no -h)
+    
+    # No prefix: -h is enabled
+    server2: ServerConfig = cli_nested(prefix="", default_factory=ServerConfig)
+    # CLI: -h, --host (short option works)
+```
+
+**Collision Detection:**
+```python
+@dataclass
+class Nested:
+    name: str = "nested"
+
+@dataclass
+class Config:
+    name: str = "parent"
+    nested: Nested = cli_nested(prefix="", default_factory=Nested)
+
+# ERROR: Field name collision detected on --name
+```
+
+**Config File Integration:**
+```python
+# config.yaml
+database:
+  host: "prod-db.example.com"
+  port: 5432
+  username: "prod_user"
+
+# CLI with partial override
+config = build_config(AppConfig, args=[
+    '--config', 'config.yaml',
+    '--db-password', 'secret'  # Override specific field
+])
+
+# Result:
+# - database.host: "prod-db.example.com" (from file)
+# - database.port: 5432 (from file)
+# - database.password: "secret" (CLI override)
+```
+
+**See Also:**
+- [README: Nested Dataclasses](../README.md#nested-dataclasses)
+- [Example: nested_dataclass.py](../examples/nested_dataclass.py)
+- [Example: nested_short_options.py](../examples/nested_short_options.py)
+
+---
+
 ### `cli_exclude(**kwargs)`
 
 Exclude a field from CLI argument generation (internal/derived fields).

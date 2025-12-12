@@ -61,6 +61,91 @@ def cli_include(**kwargs) -> Any:
     return field(**field_kwargs)
 
 
+def cli_nested(prefix: Optional[str] = None, **kwargs) -> Any:
+    """
+    Mark a nested dataclass field for CLI flattening.
+
+    When applied to a nested dataclass field, its fields are flattened into
+    the parent's CLI namespace with an optional prefix to avoid collisions.
+
+    Args:
+        prefix: Prefix for nested field CLI arguments:
+                - "" (empty string): No prefix, flatten completely
+                - "custom": Use custom prefix (e.g., "w" → --w-field)
+                - None (default): Auto-prefix with field name (e.g., "wrapper" → --wrapper-field)
+        **kwargs: Additional field parameters (default, default_factory, etc.)
+
+    Returns:
+        Field object with cli_nested metadata
+
+    Examples:
+        No prefix (cleanest, requires no collisions):
+
+        >>> @dataclass
+        ... class WrapperConfig:
+        ...     retry_count: int = 3
+        ...     timeout: int = 30
+        >>>
+        >>> @dataclass
+        ... class MyAppConfig:
+        ...     app_name: str
+        ...     wrapper: WrapperConfig = cli_nested(prefix="")
+
+        CLI: --app-name "MyApp" --retry-count 5 --timeout 60
+        Result: config.wrapper.retry_count == 5
+
+        Custom short prefix (safe, concise):
+
+        >>> @dataclass
+        ... class MyAppConfig:
+        ...     app_name: str
+        ...     wrapper: WrapperConfig = cli_nested(prefix="w")
+
+        CLI: --app-name "MyApp" --w-retry-count 5 --w-timeout 60
+        Result: config.wrapper.timeout == 60
+
+        Auto-prefix with field name (explicit):
+
+        >>> @dataclass
+        ... class MyAppConfig:
+        ...     app_name: str
+        ...     wrapper: WrapperConfig = cli_nested()
+
+        CLI: --app-name "MyApp" --wrapper-retry-count 5
+        Result: config.wrapper.retry_count == 5
+
+        Multiple nested dataclasses:
+
+        >>> @dataclass
+        ... class RetryConfig:
+        ...     max_attempts: int = 3
+        >>>
+        >>> @dataclass
+        ... class LoggingConfig:
+        ...     level: str = "INFO"
+        >>>
+        >>> @dataclass
+        ... class MyAppConfig:
+        ...     app_name: str
+        ...     retry: RetryConfig = cli_nested(prefix="r")
+        ...     logging: LoggingConfig = cli_nested(prefix="log")
+
+        CLI: --app-name "MyApp" --r-max-attempts 5 --log-level DEBUG
+
+    Note:
+        - When prefix="", collision detection ensures no field name conflicts
+        - Mixed flat and nested fields are fully supported
+        - Nested dataclass must have defaults for all fields or use default_factory
+        - Only single-level nesting is currently supported
+    """
+    field_kwargs = kwargs.copy()
+    metadata = field_kwargs.pop("metadata", {})
+    metadata["cli_nested"] = True
+    metadata["cli_nested_prefix"] = prefix
+    field_kwargs["metadata"] = metadata
+    return field(**field_kwargs)
+
+
 def cli_help(help_text: str, **kwargs) -> Any:
     """
     Add custom help text for a CLI argument.
@@ -306,7 +391,9 @@ def cli_append(
         ...     )
 
     Note:
-        - Field type should be List[T] for nargs=None, or List[List[T]] for nargs with multiple values
+        "Nested dataclass fields are not allowed within nested dataclasses. "
+        "Only use cli_nested() at the top level."
+    )
         - Always use default_factory=list for append fields
         - Cannot be combined with cli_positional()
     """
@@ -399,164 +486,6 @@ def combine_annotations(*annotations, **field_kwargs) -> Any:
 
     field_kwargs["metadata"] = combined_metadata
     return field(**field_kwargs)
-
-
-def is_cli_excluded(field_info: Dict[str, Any]) -> bool:
-    """
-    Check if a field should be excluded from CLI arguments.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        True if field should be excluded from CLI
-    """
-    # Check for explicit CLI exclusion metadata
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_exclude", False)
-
-    return False
-
-
-def is_cli_included(field_info: Dict[str, Any]) -> bool:
-    """
-    Check if a field is explicitly marked for CLI inclusion.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        True if field is explicitly marked for CLI inclusion
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_include", False)
-
-    return False
-
-
-def is_cli_file_loadable(field_info: Dict[str, Any]) -> bool:
-    """
-    Check if a field is marked as file-loadable via '@' prefix.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        True if field supports file loading via '@' prefix
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_file_loadable", False)
-
-    return False
-
-
-def is_cli_append(field_info: Dict[str, Any]) -> bool:
-    """
-    Check if a field uses append action for repeated options.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        True if field uses append action
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_append", False)
-    return False
-
-
-def get_cli_short(field_info: Dict[str, Any]) -> Optional[str]:
-    """
-    Get short option character for a CLI argument.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        Short option character if available, otherwise None
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_short")
-    return None
-
-
-def get_cli_choices(field_info: Dict[str, Any]) -> Optional[List[Any]]:
-    """
-    Get restricted choices for a CLI argument.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        List of valid choices if available, otherwise None
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_choices")
-    return None
-
-
-def get_cli_append_nargs(field_info: Dict[str, Any]) -> Optional[Any]:
-    """
-    Get nargs value for an append CLI argument.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        nargs value if specified, otherwise None (meaning exactly one per occurrence)
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_append_nargs")
-    return None
-
-
-def get_cli_append_metavar(field_info: Dict[str, Any]) -> Optional[str]:
-    """
-    Get metavar for an append CLI argument.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        Metavar string if specified, otherwise None
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_append_metavar")
-    return None
-
-
-def get_cli_help(field_info: Dict[str, Any]) -> str:
-    """
-    Get custom help text for a CLI argument.
-
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        Custom help text if available, otherwise empty string
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        help_text = field_obj.metadata.get("cli_help", "")
-
-        # Add file-loadable hint to help text if applicable
-        if field_obj.metadata.get("cli_file_loadable", False):
-            if help_text:
-                help_text += " (supports @file.txt to load from file)"
-            else:
-                help_text = "supports @file.txt to load from file"
-
-        return help_text
-
-    return ""
 
 
 def cli_positional(
@@ -660,6 +589,114 @@ def cli_positional(
     return field(**field_kwargs)
 
 
+# ============================================================================
+# Metadata Helper Functions
+# ============================================================================
+
+
+def is_cli_excluded(field_info: Dict[str, Any]) -> bool:
+    """
+    Check if a field should be excluded from CLI arguments.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        True if field should be excluded from CLI
+    """
+    # Check for explicit CLI exclusion metadata
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_exclude", False)
+
+    return False
+
+
+def is_cli_included(field_info: Dict[str, Any]) -> bool:
+    """
+    Check if a field is explicitly marked for CLI inclusion.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        True if field is explicitly marked for CLI inclusion
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_include", False)
+
+    return False
+
+
+def is_cli_nested(field_info: Dict[str, Any]) -> bool:
+    """
+    Check if a field is marked for nested dataclass flattening.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        True if field should be flattened as nested dataclass
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_nested", False)
+    return False
+
+
+def get_cli_nested_prefix(field_info: Dict[str, Any]) -> Optional[str]:
+    """
+    Get prefix for nested dataclass CLI arguments.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Prefix string if specified:
+        - "" (empty string): No prefix
+        - "custom": Custom prefix
+        - None: Auto-prefix with field name (default)
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_nested_prefix")
+    return None
+
+
+def is_cli_file_loadable(field_info: Dict[str, Any]) -> bool:
+    """
+    Check if a field is marked as file-loadable via '@' prefix.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        True if field supports file loading via '@' prefix
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_file_loadable", False)
+
+    return False
+
+
+def is_cli_append(field_info: Dict[str, Any]) -> bool:
+    """
+    Check if a field uses append action for repeated options.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        True if field uses append action
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append", False)
+    return False
+
+
 def is_cli_positional(field_info: Dict[str, Any]) -> bool:
     """
     Check if a field is marked as a positional CLI argument.
@@ -674,6 +711,102 @@ def is_cli_positional(field_info: Dict[str, Any]) -> bool:
     if field_obj and hasattr(field_obj, "metadata"):
         return field_obj.metadata.get("cli_positional", False)
     return False
+
+
+def get_cli_short(field_info: Dict[str, Any]) -> Optional[str]:
+    """
+    Get short option character for a CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Short option character if available, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_short")
+    return None
+
+
+def get_cli_choices(field_info: Dict[str, Any]) -> Optional[List[Any]]:
+    """
+    Get restricted choices for a CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        List of valid choices if available, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_choices")
+    return None
+
+
+def get_cli_append_nargs(field_info: Dict[str, Any]) -> Optional[Any]:
+    """
+    Get nargs value for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        nargs value if specified, otherwise None (meaning exactly one per occurrence)
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_nargs")
+    return None
+
+
+def get_cli_append_metavar(field_info: Dict[str, Any]) -> Optional[str]:
+    """
+    Get metavar for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Metavar string if specified, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_metavar")
+    return None
+
+
+def get_cli_append_min_args(field_info: Dict[str, Any]) -> Optional[int]:
+    """
+    Get minimum arguments for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Minimum argument count if specified, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_min_args")
+    return None
+
+
+def get_cli_append_max_args(field_info: Dict[str, Any]) -> Optional[int]:
+    """
+    Get maximum arguments for an append CLI argument.
+
+    Args:
+        field_info: Field information dictionary from GenericConfigBuilder
+
+    Returns:
+        Maximum argument count if specified, otherwise None
+    """
+    field_obj = field_info.get("field_obj")
+    if field_obj and hasattr(field_obj, "metadata"):
+        return field_obj.metadata.get("cli_append_max_args")
+    return None
 
 
 def get_cli_positional_nargs(field_info: Dict[str, Any]) -> Optional[Any]:
@@ -708,33 +841,27 @@ def get_cli_positional_metavar(field_info: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def get_cli_append_min_args(field_info: Dict[str, Any]) -> Optional[int]:
+def get_cli_help(field_info: Dict[str, Any]) -> str:
     """
-    Get minimum arguments for an append CLI argument.
+    Get custom help text for a CLI argument.
 
     Args:
         field_info: Field information dictionary from GenericConfigBuilder
 
     Returns:
-        Minimum argument count if specified, otherwise None
+        Custom help text if available, otherwise empty string
     """
     field_obj = field_info.get("field_obj")
     if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_append_min_args")
-    return None
+        help_text = field_obj.metadata.get("cli_help", "")
 
+        # Add file-loadable hint to help text if applicable
+        if field_obj.metadata.get("cli_file_loadable", False):
+            if help_text:
+                help_text += " (supports @file.txt to load from file)"
+            else:
+                help_text = "supports @file.txt to load from file"
 
-def get_cli_append_max_args(field_info: Dict[str, Any]) -> Optional[int]:
-    """
-    Get maximum arguments for an append CLI argument.
+        return help_text
 
-    Args:
-        field_info: Field information dictionary from GenericConfigBuilder
-
-    Returns:
-        Maximum argument count if specified, otherwise None
-    """
-    field_obj = field_info.get("field_obj")
-    if field_obj and hasattr(field_obj, "metadata"):
-        return field_obj.metadata.get("cli_append_max_args")
-    return None
+    return ""
