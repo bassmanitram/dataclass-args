@@ -613,187 +613,75 @@ class GenericConfigBuilder:
 
         Args:
             parser: ArgumentParser to add arguments to
-            cli_name: Pre-computed CLI name with prefix (e.g., "--w-retry-count")
+            cli_name: Pre-computed CLI name with prefix (e.g., "--agent-retry-count")
             info: Field info from nested dataclass analysis
             prefix: Prefix used for this nested field (empty string = no prefix)
-
-        Note:
-            - Positional arguments in nested fields are NOT supported
-            - Short options ARE supported when prefix is empty (prefix="")
-            - Short options are NOT supported when prefix is non-empty
         """
-        # Get short option if prefix is empty (no prefix = allow short options)
-        short_option = None
-        if prefix == "":
-            short_option = get_cli_short(info)
-
-        # Build argument names list
-        arg_names = []
-        if short_option:
-            arg_names.append(f"-{short_option}")
-        arg_names.append(cli_name)
-
-        # Special handling for boolean fields
+        # Boolean fields handled separately
         if info["type"] == bool:
-            # Extract field name from cli_name (remove -- prefix and convert to snake_case)
             field_name = cli_name.lstrip("-").replace("-", "_")
-            # Need to update info with the prefixed cli_name
             nested_info = dict(info)
             nested_info["cli_name"] = cli_name
             self._add_boolean_argument(parser, field_name, nested_info)
             return
 
-        # Get custom help text from annotations or use default
+        # Get short option (only if no prefix)
+        short_option = get_cli_short(info) if prefix == "" else None
+        arg_names = self._build_arg_names(cli_name, short_option)
+
+        # Build help text
         custom_help = get_cli_help(info)
-        help_text = custom_help if custom_help else f"nested field"
-
-        # Get restricted choices if specified
+        help_text = custom_help if custom_help else "nested field"
         choices = get_cli_choices(info)
-        if choices:
-            choices_str = ", ".join(str(c) for c in choices)
-            if help_text:
-                help_text += f" (choices: {choices_str})"
-            else:
-                help_text = f"choices: {choices_str}"
 
-        # Check if this is an append field
+        # Handle append fields
         if is_cli_append(info):
-            # For append fields, use arg_names
+            help_text = self._build_help_text(help_text, choices)
             self._add_append_argument(parser, arg_names, info, help_text, choices)
             return
 
+        # Handle by type
         if info["is_list"]:
-            # List parameters accept multiple values after a single flag
-            if info["is_optional"]:
-                nargs_val = "*"
-                help_text += " (specify zero or more values)"
-            else:
-                nargs_val = "+"
-                help_text += " (specify one or more values)"
-
-            parser.add_argument(
-                *arg_names, nargs=nargs_val, choices=choices, help=help_text
-            )
+            self._add_list_field(parser, arg_names, info, help_text, choices)
         elif info["is_dict"]:
-            # Dict parameters are file paths
-            dict_help = (
-                f"{help_text} configuration file path"
-                if help_text
-                else "configuration file path"
-            )
-            parser.add_argument(*arg_names, type=str, help=dict_help)
-
-            # Add override argument for dict fields in nested dataclasses
-            # Calculate override name with same prefix logic as main argument
-            if prefix == "":
-                # No prefix - use override_name from info directly
-                override_name = info.get("override_name", "")
-            else:
-                # With prefix - apply prefix to the override abbreviation
-                # info["override_name"] is like "--mc" (abbreviation from nested field)
-                base_override = info.get("override_name", "").lstrip("--")
-                if base_override:
-                    override_name = f"--{prefix}{base_override}"
-                else:
-                    # Fallback shouldn't happen, but handle it
-                    override_name = f"--{prefix}override"
-
-            if override_name:
-                override_help = (
-                    f"{help_text} property override (format: key.path:value)"
-                    if help_text
-                    else "property override (format: key.path:value)"
-                )
-                parser.add_argument(
-                    override_name,
-                    action="append",
-                    help=override_help,
-                )
+            override_name = self._compute_override_name(info, prefix)
+            self._add_dict_field(parser, arg_names, help_text, override_name)
         else:
-            # Simple scalar parameters
-            arg_type = self._get_argument_type(info["type"])
-            parser.add_argument(
-                *arg_names, type=arg_type, choices=choices, help=help_text
-            )
+            self._add_scalar_field(parser, arg_names, info, help_text, choices)
 
     def _add_field_argument(
         self, parser: argparse.ArgumentParser, field_name: str, info: Dict[str, Any]
     ) -> None:
         """Add CLI argument for a specific config field."""
-        # Special handling for boolean fields
+        # Boolean fields handled separately
         if info["type"] == bool:
             self._add_boolean_argument(parser, field_name, info)
             return
 
+        # Get CLI name and short option
         cli_name = info["cli_name"]
-
-        # Get short option from metadata
         short_option = get_cli_short(info)
+        arg_names = self._build_arg_names(cli_name, short_option)
 
-        # Build argument names list
-        arg_names = []
-        if short_option:
-            arg_names.append(f"-{short_option}")  # Short comes first: -n
-        arg_names.append(cli_name)  # Then long: --name
-
-        # Get custom help text from annotations or use default
+        # Build help text
         custom_help = get_cli_help(info)
-        help_text = custom_help if custom_help else f"{field_name}"
-
-        # Get restricted choices if specified
+        help_text = custom_help if custom_help else field_name
         choices = get_cli_choices(info)
-        if choices:
-            # Add choices hint to help text
-            choices_str = ", ".join(str(c) for c in choices)
-            if help_text:
-                help_text += f" (choices: {choices_str})"
-            else:
-                help_text = f"choices: {choices_str}"
 
-        # Check if this is an append field
+        # Handle append fields
         if is_cli_append(info):
+            help_text = self._build_help_text(help_text, choices)
             self._add_append_argument(parser, arg_names, info, help_text, choices)
             return
 
+        # Handle by type
         if info["is_list"]:
-            # List parameters accept multiple values after a single flag
-            # Use nargs='+' for required lists (one or more values)
-            # Use nargs='*' for optional lists (zero or more values)
-            if info["is_optional"]:
-                nargs_val = "*"  # Zero or more values for Optional[List[T]]
-                help_text += " (specify zero or more values)"
-            else:
-                nargs_val = "+"  # One or more values for List[T]
-                help_text += " (specify one or more values)"
-
-            parser.add_argument(
-                *arg_names, nargs=nargs_val, choices=choices, help=help_text
-            )
+            self._add_list_field(parser, arg_names, info, help_text, choices)
         elif info["is_dict"]:
-            # Dict parameters are file paths
-            dict_help = (
-                f"{help_text} configuration file path"
-                if help_text
-                else "configuration file path"
-            )
-            parser.add_argument(*arg_names, type=str, help=dict_help)
-            # Add override argument for dict fields (no short form for overrides)
-            override_help = (
-                f"{help_text} property override (format: key.path:value)"
-                if help_text
-                else "property override (format: key.path:value)"
-            )
-            parser.add_argument(
-                info["override_name"],
-                action="append",
-                help=override_help,
-            )
+            override_name = info["override_name"]
+            self._add_dict_field(parser, arg_names, help_text, override_name)
         else:
-            # Simple scalar parameters
-            arg_type = self._get_argument_type(info["type"])
-            parser.add_argument(
-                *arg_names, type=arg_type, choices=choices, help=help_text
-            )
+            self._add_scalar_field(parser, arg_names, info, help_text, choices)
 
     def _add_append_argument(
         self,
@@ -885,24 +773,17 @@ class GenericConfigBuilder:
     def _add_boolean_argument(
         self, parser: argparse.ArgumentParser, field_name: str, info: Dict[str, Any]
     ) -> None:
-        """Add boolean argument with positive and negative forms."""
+        """Add boolean flag argument with positive and negative forms."""
         cli_name = info["cli_name"]
         dest_name = field_name.replace("-", "_")
 
-        # Get short option from metadata
+        # Get short option and build arg names
         short_option = get_cli_short(info)
+        positive_args = self._build_arg_names(cli_name, short_option)
 
-        # Build argument names for positive form
-        positive_args = []
-        if short_option:
-            positive_args.append(f"-{short_option}")
-        positive_args.append(cli_name)
-
-        # Get custom help text
+        # Get help text and default
         custom_help = get_cli_help(info)
         help_text = custom_help if custom_help else field_name
-
-        # Get default value
         default_value = info.get("default", False)
 
         # Add positive form (--flag or -f)
@@ -932,6 +813,130 @@ class GenericConfigBuilder:
         else:
             # For complex types, use string and let validation handle it
             return str
+
+    # ========================================================================
+    # Helper Methods for Argument Generation
+    # ========================================================================
+
+    def _build_arg_names(
+        self, cli_name: str, short_option: Optional[str] = None
+    ) -> List[str]:
+        """
+        Build argument names list with optional short option.
+
+        Args:
+            cli_name: Long-form CLI name (e.g., "--host")
+            short_option: Optional short option character (e.g., "h")
+
+        Returns:
+            List of argument names, short option first if present
+        """
+        arg_names = []
+        if short_option:
+            arg_names.append(f"-{short_option}")
+        arg_names.append(cli_name)
+        return arg_names
+
+    def _build_help_text(
+        self,
+        base_help: str,
+        choices: Optional[List[Any]] = None,
+        extra_suffix: Optional[str] = None,
+    ) -> str:
+        """
+        Build help text with optional choices and suffix.
+
+        Args:
+            base_help: Base help text
+            choices: Optional list of valid choices
+            extra_suffix: Optional suffix to append
+
+        Returns:
+            Complete help text
+        """
+        help_text = base_help
+        if choices:
+            choices_str = ", ".join(str(c) for c in choices)
+            help_text += f" (choices: {choices_str})"
+        if extra_suffix:
+            help_text += f" {extra_suffix}"
+        return help_text
+
+    def _compute_override_name(self, info: Dict[str, Any], prefix: str) -> str:
+        """
+        Compute override argument name for dict fields.
+
+        Args:
+            info: Field info dict containing override_name
+            prefix: Prefix for nested fields (empty string = no prefix)
+
+        Returns:
+            Override argument name (e.g., "--mc" or "--agent-mc")
+        """
+        if prefix == "":
+            return info.get("override_name", "")
+        else:
+            base_override = info.get("override_name", "").lstrip("--")
+            return (
+                f"--{prefix}{base_override}" if base_override else f"--{prefix}override"
+            )
+
+    def _add_list_field(
+        self,
+        parser: argparse.ArgumentParser,
+        arg_names: List[str],
+        info: Dict[str, Any],
+        help_text: str,
+        choices: Optional[List[Any]] = None,
+    ) -> None:
+        """Add list field argument with appropriate nargs."""
+        if info["is_optional"]:
+            nargs_val = "*"
+            help_suffix = "(specify zero or more values)"
+        else:
+            nargs_val = "+"
+            help_suffix = "(specify one or more values)"
+
+        final_help = self._build_help_text(help_text, choices, help_suffix)
+        parser.add_argument(
+            *arg_names, nargs=nargs_val, choices=choices, help=final_help
+        )
+
+    def _add_dict_field(
+        self,
+        parser: argparse.ArgumentParser,
+        arg_names: List[str],
+        help_text: str,
+        override_name: str,
+    ) -> None:
+        """Add dict field argument with file path and override support."""
+        dict_help = (
+            f"{help_text} configuration file path"
+            if help_text
+            else "configuration file path"
+        )
+        parser.add_argument(*arg_names, type=str, help=dict_help)
+
+        if override_name:
+            override_help = (
+                f"{help_text} property override (format: key.path:value)"
+                if help_text
+                else "property override (format: key.path:value)"
+            )
+            parser.add_argument(override_name, action="append", help=override_help)
+
+    def _add_scalar_field(
+        self,
+        parser: argparse.ArgumentParser,
+        arg_names: List[str],
+        info: Dict[str, Any],
+        help_text: str,
+        choices: Optional[List[Any]] = None,
+    ) -> None:
+        """Add scalar field argument."""
+        arg_type = self._get_argument_type(info["type"])
+        final_help = self._build_help_text(help_text, choices)
+        parser.add_argument(*arg_names, type=arg_type, choices=choices, help=final_help)
 
     def _validate_append_ranges(self, config_dict: Dict[str, Any]) -> None:
         """
