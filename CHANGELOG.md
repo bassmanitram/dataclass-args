@@ -1,4 +1,4 @@
-## [Unreleased]
+## [1.4.1] - 2025-12-12
 
 ### Added
 - **Property override support for dict fields in nested dataclasses**
@@ -17,7 +17,7 @@
 ### Tests
 - Added 7 new tests in `tests/test_nested_dict_override.py`
   - Override argument generation with prefix
-  - Override argument generation without prefix  
+  - Override argument generation without prefix
   - Override parsing with prefix
   - Override parsing without prefix
   - Help text verification
