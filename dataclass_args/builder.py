@@ -1236,6 +1236,39 @@ class GenericConfigBuilder:
                                 f"'{parent_field}.{nested_field}': {e}"
                             ) from e
 
+                # Handle property overrides for dict fields (even if no file was loaded)
+                if nested_info["is_dict"]:
+                    # Get override argument name with prefix
+                    base_override = nested_info.get("override_name", "").lstrip("--")
+                    prefix = mapping.get("prefix", "")
+
+                    if base_override:
+                        # Apply prefix if present
+                        if prefix:
+                            override_arg_name = f"{prefix}{base_override}".replace(
+                                "-", "_"
+                            )
+                        else:
+                            override_arg_name = base_override.replace("-", "_")
+
+                        override_value = getattr(args, override_arg_name, None)
+                        if override_value:
+                            # Initialize dict if not already present
+                            if nested_field not in nested_data[parent_field]:
+                                nested_data[parent_field][nested_field] = {}
+
+                            # Apply property overrides
+                            try:
+                                self._apply_property_overrides(
+                                    nested_data[parent_field][nested_field],
+                                    override_value,
+                                )
+                            except Exception as e:
+                                raise ConfigurationError(
+                                    f"Failed to apply property overrides for nested field "
+                                    f"'{parent_field}.{nested_field}': {e}"
+                                ) from e
+
         # Now reconstruct nested dataclass instances
         for field_name, info in self._config_fields.items():
             if info.get("is_nested_dataclass", False):
