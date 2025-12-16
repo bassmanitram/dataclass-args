@@ -118,5 +118,5 @@ All tests run automatically on:
 
 ---
 
-**Last Updated:** 2025-12-16  
+**Last Updated:** 2025-12-16
 **Version:** 1.4.2
