@@ -38,9 +38,11 @@ from .annotations import (
     is_cli_positional,
 )
 from .append_action import RangeAppendAction
+from .config_applicator import ConfigApplicator
 from .exceptions import ConfigBuilderError, ConfigurationError
 from .file_loading import process_file_loadable_value
 from .formatter import RangeAppendHelpFormatter
+from .nested_processor import NestedFieldProcessor
 from .type_inspector import TypeInspector
 from .utils import load_structured_file
 
@@ -255,98 +257,9 @@ class GenericConfigBuilder:
             return "--" + "".join(word[0] for word in words if word)
 
     def _flatten_nested_fields(self) -> Dict[str, Any]:
-        """
-        Flatten nested dataclass fields into a single namespace.
-
-        Returns:
-            Dict mapping flat CLI names to their metadata including:
-            - parent_field: Name of parent field (None for flat fields)
-            - nested_field: Name of field in nested dataclass (None for flat fields)
-            - nested_info: Field info from nested dataclass
-            - prefix: Prefix used for this nested field
-            - field_info: Field info for flat fields
-        """
-        flat_fields: Dict[str, Dict[str, Any]] = {}
-
-        for field_name, info in self._config_fields.items():
-            if info.get("is_nested_dataclass", False):
-                # This is a nested dataclass - flatten its fields
-                nested_class = info["type"]
-                prefix = info["nested_prefix"]
-
-                # Recursively analyze nested dataclass fields
-                nested_builder = GenericConfigBuilder(nested_class)
-
-                for (
-                    nested_field_name,
-                    nested_info,
-                ) in nested_builder._config_fields.items():
-                    # Build flat CLI name with prefix
-                    if prefix == "":
-                        # No prefix - flatten completely
-                        flat_cli_name = f"--{nested_field_name.replace('_', '-')}"
-                    else:
-                        # With prefix
-                        flat_cli_name = (
-                            f"--{prefix}{nested_field_name.replace('_', '-')}"
-                        )
-
-                    # Check for collision before adding
-                    if flat_cli_name in flat_fields:
-                        # Collision detected - build error now
-                        prev_mapping = flat_fields[flat_cli_name]
-                        if prev_mapping.get("parent_field"):
-                            source1 = f"{prev_mapping['parent_field']}.{prev_mapping['nested_field']}"
-                        else:
-                            source1 = prev_mapping["field_name"]
-                        source2 = f"{field_name}.{nested_field_name}"
-
-                        raise ConfigBuilderError(
-                            f"Field name collision detected when flattening nested dataclasses:\n\n"
-                            f"  {flat_cli_name}\n"
-                            f"    - {source1}\n"
-                            f"    - {source2}\n\n"
-                            f"Solutions:\n"
-                            f"  1. Add prefix to nested fields:\n"
-                            f"     {field_name}: {nested_class.__name__} = cli_nested(prefix='n')\n"
-                            f"  2. Rename conflicting fields\n"
-                            f"  3. Use auto-prefix (don't specify prefix='')"
-                        )
-
-                    flat_fields[flat_cli_name] = {
-                        "parent_field": field_name,
-                        "nested_field": nested_field_name,
-                        "nested_info": nested_info,
-                        "prefix": prefix,
-                        "parent_info": info,
-                    }
-            else:
-                # Regular flat field
-                cli_name = info["cli_name"]
-
-                # Check for collision before adding
-                if cli_name in flat_fields:
-                    prev_mapping = flat_fields[cli_name]
-                    if prev_mapping.get("parent_field"):
-                        source1 = f"{prev_mapping['parent_field']}.{prev_mapping['nested_field']}"
-                    else:
-                        source1 = prev_mapping["field_name"]
-
-                    raise ConfigBuilderError(
-                        f"Field name collision detected:\n\n"
-                        f"  {cli_name}\n"
-                        f"    - {source1}\n"
-                        f"    - {field_name}\n\n"
-                        f"This should not happen with non-nested fields. Please report this bug."
-                    )
-
-                flat_fields[cli_name] = {
-                    "parent_field": None,
-                    "field_info": info,
-                    "field_name": field_name,
-                }
-
-        return flat_fields
+        """Flatten nested fields (delegates to NestedFieldProcessor)."""
+        processor = NestedFieldProcessor(self.config_class, self._config_fields)
+        return processor.flatten()
 
     def _validate_nested_collisions(self) -> None:
         """
@@ -1097,30 +1010,8 @@ class GenericConfigBuilder:
         )
 
     def _apply_base_configs(self, base_configs: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Apply base configuration dictionaries in order.
-
-        Args:
-            base_configs: List of configuration dictionaries to merge in order
-
-        Returns:
-            Merged configuration dictionary
-
-        Note:
-            Each config in the list is applied sequentially with shallow merge.
-            Later configs override earlier ones.
-        """
-        config = {}
-
-        for base_config in base_configs:
-            if not isinstance(base_config, dict):
-                raise ConfigurationError(
-                    f"base_configs must contain dictionaries, got {type(base_config)}"
-                )
-            # Shallow merge: later configs override earlier ones
-            config.update(base_config)
-
-        return config
+        """Apply base configuration dictionaries (delegates to ConfigApplicator)."""
+        return ConfigApplicator.apply_base_configs(base_configs)
 
     def _apply_config_file(
         self,
@@ -1128,161 +1019,16 @@ class GenericConfigBuilder:
         args: argparse.Namespace,
         base_config_name: str,
     ) -> Dict[str, Any]:
-        """
-        Load and merge configuration from --config file argument.
-
-        Args:
-            config: Current configuration dictionary
-            args: Parsed CLI arguments
-            base_config_name: Name of the config file argument
-
-        Returns:
-            Updated configuration dictionary with file config merged
-
-        Raises:
-            ConfigurationError: If file cannot be loaded
-        """
-        base_config_value = getattr(args, base_config_name.replace("-", "_"), None)
-
-        if base_config_value:
-            try:
-                file_config = load_structured_file(base_config_value)
-                # Merge file config into existing config (file overrides base_configs)
-                config.update(file_config)
-            except Exception as e:
-                raise ConfigurationError(
-                    f"Failed to load config file '{base_config_value}': {e}"
-                ) from e
-
-        return config
+        """Load and merge config from --config file (delegates to ConfigApplicator)."""
+        return ConfigApplicator.apply_config_file(config, args, base_config_name)
 
     def _reconstruct_nested_fields(
         self, config: Dict[str, Any], args: argparse.Namespace
     ) -> Dict[str, Any]:
-        """
-        Reconstruct nested dataclass instances from flat CLI arguments.
-
-        Args:
-            config: Current configuration dictionary
-            args: Parsed CLI arguments with flat nested fields
-
-        Returns:
-            Configuration dict with nested dataclass instances reconstructed
-        """
-        # Get flattened field mapping
+        """Reconstruct nested fields (delegates to NestedFieldProcessor)."""
         flat_fields = self._flatten_nested_fields()
-
-        # Group nested fields by parent
-        nested_data: Dict[str, Dict[str, Any]] = {}
-
-        for cli_name, mapping in flat_fields.items():
-            if mapping.get("parent_field"):
-                # This is a nested field
-                parent_field = mapping["parent_field"]
-                nested_field = mapping["nested_field"]
-                nested_info = mapping["nested_info"]
-
-                # Convert CLI name to arg name (remove -- and convert to underscores)
-                arg_name = cli_name.lstrip("-").replace("-", "_")
-                cli_value = getattr(args, arg_name, None)
-
-                # Initialize nested data dict for this parent if needed
-                if parent_field not in nested_data:
-                    nested_data[parent_field] = {}
-
-                # Process the value
-                if cli_value is not None:
-                    if nested_info["is_list"]:
-                        nested_data[parent_field][nested_field] = cli_value
-                    elif nested_info["is_dict"]:
-                        # Load dict from file
-                        try:
-                            dict_config = load_structured_file(cli_value)
-                            nested_data[parent_field][nested_field] = dict_config
-                        except Exception as e:
-                            raise ConfigurationError(
-                                f"Failed to load dictionary config for nested field "
-                                f"'{parent_field}.{nested_field}' from {cli_value}: {e}"
-                            ) from e
-                    else:
-                        # Process file-loadable values
-                        try:
-                            processed_value = process_file_loadable_value(
-                                cli_value, nested_field, nested_info
-                            )
-                            nested_data[parent_field][nested_field] = processed_value
-                        except (ValueError, Exception) as e:
-                            raise ConfigurationError(
-                                f"Failed to process nested field "
-                                f"'{parent_field}.{nested_field}': {e}"
-                            ) from e
-
-                # Handle property overrides for dict fields (even if no file was loaded)
-                if nested_info["is_dict"]:
-                    # Get override argument name with prefix
-                    base_override = nested_info.get("override_name", "").lstrip("--")
-                    prefix = mapping.get("prefix", "")
-
-                    if base_override:
-                        # Apply prefix if present
-                        if prefix:
-                            override_arg_name = f"{prefix}{base_override}".replace(
-                                "-", "_"
-                            )
-                        else:
-                            override_arg_name = base_override.replace("-", "_")
-
-                        override_value = getattr(args, override_arg_name, None)
-                        if override_value:
-                            # Initialize dict if not already present
-                            if nested_field not in nested_data[parent_field]:
-                                nested_data[parent_field][nested_field] = {}
-
-                            # Apply property overrides
-                            try:
-                                self._apply_property_overrides(
-                                    nested_data[parent_field][nested_field],
-                                    override_value,
-                                )
-                            except Exception as e:
-                                raise ConfigurationError(
-                                    f"Failed to apply property overrides for nested field "
-                                    f"'{parent_field}.{nested_field}': {e}"
-                                ) from e
-
-        # Now reconstruct nested dataclass instances
-        for field_name, info in self._config_fields.items():
-            if info.get("is_nested_dataclass", False):
-                nested_class = info["type"]
-
-                # Start with existing config value (from base configs or defaults)
-                if field_name in config and config[field_name] is not None:
-                    # Convert existing instance to dict if needed
-                    if is_dataclass(config[field_name]):
-                        from dataclasses import asdict
-
-                        existing_dict = asdict(config[field_name])
-                    elif isinstance(config[field_name], dict):
-                        existing_dict = config[field_name].copy()
-                    else:
-                        existing_dict = {}
-                else:
-                    existing_dict = {}
-
-                # Merge CLI overrides
-                if field_name in nested_data:
-                    existing_dict.update(nested_data[field_name])
-
-                # Reconstruct nested dataclass instance
-                try:
-                    config[field_name] = nested_class(**existing_dict)
-                except Exception as e:
-                    raise ConfigurationError(
-                        f"Failed to create nested dataclass {nested_class.__name__} "
-                        f"for field '{field_name}': {e}"
-                    ) from e
-
-        return config
+        processor = NestedFieldProcessor(self.config_class, self._config_fields)
+        return processor.reconstruct(config, args, flat_fields)
 
     def _apply_cli_overrides(
         self, config: Dict[str, Any], args: argparse.Namespace
@@ -1392,13 +1138,8 @@ class GenericConfigBuilder:
         current[keys[-1]] = value
 
     def _parse_value(self, value_str: str) -> Any:
-        """Parse string value to appropriate type."""
-        # Try to parse as JSON first (handles numbers, booleans, etc.)
-        try:
-            return json.loads(value_str)
-        except json.JSONDecodeError:
-            # Return as string if not valid JSON
-            return value_str
+        """Parse string value (delegates to ConfigApplicator)."""
+        return ConfigApplicator._parse_value(value_str)
 
 
 # Convenience functions
