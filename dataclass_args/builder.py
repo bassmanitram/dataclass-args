@@ -113,7 +113,7 @@ class GenericConfigBuilder:
 
         for field_obj in fields(self.config_class):
             field_type = type_hints.get(field_obj.name, field_obj.type)
-            
+
             # Determine field category
             is_optional = TypeInspector.is_optional(field_type)
             if is_optional:
@@ -533,10 +533,11 @@ class GenericConfigBuilder:
         for cli_name, mapping in flat_fields.items():
             if mapping.get("parent_field"):
                 # Nested field - add with prefixed CLI name
+                nested_field = mapping["nested_field"]
                 info = mapping["nested_info"]
                 prefix = mapping["prefix"]
                 if not is_cli_positional(info):
-                    self._add_nested_field_argument(parser, cli_name, info, prefix)
+                    self._add_argument(parser, nested_field, info, cli_name, prefix)
             else:
                 # Regular field - skip if nested dataclass
                 field_name = mapping["field_name"]
@@ -544,7 +545,7 @@ class GenericConfigBuilder:
                 if not is_cli_positional(info) and not info.get(
                     "is_nested_dataclass", False
                 ):
-                    self._add_field_argument(parser, field_name, info)
+                    self._add_argument(parser, field_name, info)
 
     def _add_positional_argument(
         self, parser: argparse.ArgumentParser, field_name: str, info: Dict[str, Any]
@@ -599,37 +600,49 @@ class GenericConfigBuilder:
 
         parser.add_argument(arg_name, **kwargs)
 
-    def _add_nested_field_argument(
+    def _add_argument(
         self,
         parser: argparse.ArgumentParser,
-        cli_name: str,
+        field_name: str,
         info: Dict[str, Any],
+        cli_name: Optional[str] = None,
         prefix: str = "",
     ) -> None:
         """
-        Add CLI argument for a nested dataclass field.
+        Add CLI argument for a field (unified handler for flat and nested fields).
 
         Args:
             parser: ArgumentParser to add arguments to
-            cli_name: Pre-computed CLI name with prefix (e.g., "--agent-retry-count")
-            info: Field info from nested dataclass analysis
-            prefix: Prefix used for this nested field (empty string = no prefix)
+            field_name: Field name (for boolean dest and default help text)
+            info: Field info dict
+            cli_name: Pre-computed CLI name (for nested fields), uses info["cli_name"] if None
+            prefix: Prefix for nested fields (empty string = no prefix)
         """
         # Boolean fields handled separately
         if info["type"] == bool:
-            field_name = cli_name.lstrip("-").replace("-", "_")
-            nested_info = dict(info)
-            nested_info["cli_name"] = cli_name
-            self._add_boolean_argument(parser, field_name, nested_info)
+            if cli_name:
+                # Nested boolean - update cli_name in info
+                field_name = cli_name.lstrip("-").replace("-", "_")
+                nested_info = dict(info)
+                nested_info["cli_name"] = cli_name
+                self._add_boolean_argument(parser, field_name, nested_info)
+            else:
+                self._add_boolean_argument(parser, field_name, info)
             return
 
-        # Get short option (only if no prefix)
-        short_option = get_cli_short(info) if prefix == "" else None
+        # Get CLI name
+        if cli_name is None:
+            cli_name = info["cli_name"]
+
+        # Get short option (only if no prefix for nested)
+        short_option = get_cli_short(info) if prefix == "" or not cli_name else None
         arg_names = self._build_arg_names(cli_name, short_option)
 
         # Build help text
         custom_help = get_cli_help(info)
-        help_text = custom_help if custom_help else "nested field"
+        help_text = (
+            custom_help if custom_help else ("nested field" if prefix else field_name)
+        )
         choices = get_cli_choices(info)
 
         # Handle append fields
@@ -642,41 +655,11 @@ class GenericConfigBuilder:
         if info["is_list"]:
             self._add_list_field(parser, arg_names, info, help_text, choices)
         elif info["is_dict"]:
-            override_name = self._compute_override_name(info, prefix)
-            self._add_dict_field(parser, arg_names, help_text, override_name)
-        else:
-            self._add_scalar_field(parser, arg_names, info, help_text, choices)
-
-    def _add_field_argument(
-        self, parser: argparse.ArgumentParser, field_name: str, info: Dict[str, Any]
-    ) -> None:
-        """Add CLI argument for a specific config field."""
-        # Boolean fields handled separately
-        if info["type"] == bool:
-            self._add_boolean_argument(parser, field_name, info)
-            return
-
-        # Get CLI name and short option
-        cli_name = info["cli_name"]
-        short_option = get_cli_short(info)
-        arg_names = self._build_arg_names(cli_name, short_option)
-
-        # Build help text
-        custom_help = get_cli_help(info)
-        help_text = custom_help if custom_help else field_name
-        choices = get_cli_choices(info)
-
-        # Handle append fields
-        if is_cli_append(info):
-            help_text = self._build_help_text(help_text, choices)
-            self._add_append_argument(parser, arg_names, info, help_text, choices)
-            return
-
-        # Handle by type
-        if info["is_list"]:
-            self._add_list_field(parser, arg_names, info, help_text, choices)
-        elif info["is_dict"]:
-            override_name = info["override_name"]
+            # For nested fields, compute override name with prefix
+            if cli_name != info["cli_name"]:  # Is nested
+                override_name = self._compute_override_name(info, prefix)
+            else:  # Is flat
+                override_name = info["override_name"]
             self._add_dict_field(parser, arg_names, help_text, override_name)
         else:
             self._add_scalar_field(parser, arg_names, info, help_text, choices)
