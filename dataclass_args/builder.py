@@ -41,6 +41,7 @@ from .append_action import RangeAppendAction
 from .exceptions import ConfigBuilderError, ConfigurationError
 from .file_loading import process_file_loadable_value
 from .formatter import RangeAppendHelpFormatter
+from .type_inspector import TypeInspector
 from .utils import load_structured_file
 
 # Type alias for base_configs parameter
@@ -112,19 +113,16 @@ class GenericConfigBuilder:
 
         for field_obj in fields(self.config_class):
             field_type = type_hints.get(field_obj.name, field_obj.type)
-            origin = get_origin(field_type)
-            args = get_args(field_type)
-
+            
             # Determine field category
-            is_optional = origin is Union and type(None) in args
+            is_optional = TypeInspector.is_optional(field_type)
             if is_optional:
                 # Extract the non-None type from Optional[T]
-                field_type = next(arg for arg in args if arg is not type(None))
-                origin = get_origin(field_type)
-                args = get_args(field_type)
+                field_type = TypeInspector.unwrap_optional(field_type)
 
-            is_list = origin is list
-            is_dict = origin is dict
+            origin, args = TypeInspector.get_origin_and_args(field_type)
+            is_list = TypeInspector.is_list_type(field_type)
+            is_dict = TypeInspector.is_dict_type(field_type)
 
             # Check if this is a nested dataclass with cli_nested annotation
             is_nested_dataclass = False
