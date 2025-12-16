@@ -10,7 +10,10 @@ from typing import Any, Optional, Tuple, Type
 try:
     from typing import get_args, get_origin  # type: ignore[attr-defined]
 except ImportError:
-    from typing_extensions import get_args, get_origin  # type: ignore[assignment]
+    from typing_extensions import (  # type: ignore[assignment,no-redef]
+        get_args,
+        get_origin,
+    )
 
 
 class TypeInspector:

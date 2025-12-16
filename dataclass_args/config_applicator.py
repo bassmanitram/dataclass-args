@@ -98,10 +98,10 @@ class ConfigApplicator:
                 )
 
             path, value_str = override.split(":", 1)
-            ConfigApplicator._set_nested_property(target_dict, path, value_str)
+            ConfigApplicator.set_nested_property(target_dict, path, value_str)
 
     @staticmethod
-    def _set_nested_property(target: Dict[str, Any], path: str, value_str: str) -> None:
+    def set_nested_property(target: Dict[str, Any], path: str, value_str: str) -> None:
         """
         Set nested property using dot notation.
 
@@ -125,10 +125,10 @@ class ConfigApplicator:
 
         # Parse and set value
         final_key = keys[-1]
-        current[final_key] = ConfigApplicator._parse_value(value_str)
+        current[final_key] = ConfigApplicator.parse_value(value_str)
 
     @staticmethod
-    def _parse_value(value_str: str) -> Any:
+    def parse_value(value_str: str) -> Any:
         """
         Parse string value to appropriate type.
 

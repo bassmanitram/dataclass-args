@@ -32,12 +32,15 @@
 
 ```
 dataclass_args/
-├── builder.py         # GenericConfigBuilder - core CLI generation logic
-├── annotations.py     # Field metadata: cli_short(), cli_append(), cli_nested(), etc.
-├── file_loading.py    # @file.txt syntax support for string fields
-├── utils.py           # load_structured_file() - YAML/JSON/TOML loading
-├── exceptions.py      # ConfigBuilderError and subclasses
-└── tests/             # Comprehensive test suite (one file per feature)
+├── builder.py              # GenericConfigBuilder - core CLI generation and orchestration
+├── annotations.py          # Field metadata: cli_short(), cli_append(), cli_nested(), etc.
+├── config_applicator.py   # ConfigApplicator - config merging and property overrides
+├── nested_processor.py    # NestedFieldProcessor - nested dataclass flattening/reconstruction
+├── type_inspector.py      # TypeInspector - type analysis utilities
+├── file_loading.py        # @file.txt syntax support for string fields
+├── utils.py               # load_structured_file() - YAML/JSON/TOML loading
+├── exceptions.py          # ConfigBuilderError and subclasses
+└── tests/                 # Comprehensive test suite (424 tests, 92% coverage)
 ```
 
 **Navigation Guide**:

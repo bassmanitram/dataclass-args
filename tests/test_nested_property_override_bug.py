@@ -29,7 +29,7 @@ class TestNestedPropertyOverrideBug:
     def test_yacba_scenario_no_prefix(self):
         """
         Reproduce the exact YACBA scenario from bug report.
-        
+
         This is the most critical test case - when prefix="" the override
         arguments ARE generated (--mc) and ARE parsed, but the values
         are NOT applied to the final config.
@@ -54,9 +54,9 @@ class TestNestedPropertyOverrideBug:
         # Expected: agent.model_config should be {"temperature": 0.7}
         # Actual BUG: agent.model_config is None
         assert config.agent is not None
-        assert config.agent.model_config is not None, (
-            "BUG: model_config is None - override was not applied"
-        )
+        assert (
+            config.agent.model_config is not None
+        ), "BUG: model_config is None - override was not applied"
         assert config.agent.model_config == {"temperature": 0.7}
 
     def test_override_with_prefix(self):
@@ -77,9 +77,9 @@ class TestNestedPropertyOverrideBug:
 
         # BUG: This currently fails - model_config is None
         assert config.agent is not None
-        assert config.agent.model_config is not None, (
-            "BUG: model_config is None - override was not applied"
-        )
+        assert (
+            config.agent.model_config is not None
+        ), "BUG: model_config is None - override was not applied"
         assert config.agent.model_config == {"temperature": 0.7}
 
     def test_multiple_overrides_no_prefix(self):
@@ -94,17 +94,14 @@ class TestNestedPropertyOverrideBug:
             nested: NestedConfig = cli_nested(prefix="")
 
         # Multiple overrides via --s (abbreviation of settings)
-        config = build_config(
-            TopConfig, ["--s", "key1:value1", "--s", "key2:value2"]
-        )
+        config = build_config(TopConfig, ["--s", "key1:value1", "--s", "key2:value2"])
 
         # BUG: settings is None instead of {"key1": "value1", "key2": "value2"}
         assert config.nested is not None
-        assert config.nested.settings is not None, (
-            "BUG: settings is None - overrides were not applied"
-        )
+        assert (
+            config.nested.settings is not None
+        ), "BUG: settings is None - overrides were not applied"
         assert config.nested.settings == {"key1": "value1", "key2": "value2"}
-
 
     def test_override_with_file_loading_no_prefix(self):
         """Property overrides should work alongside file loading."""
@@ -118,9 +115,7 @@ class TestNestedPropertyOverrideBug:
             nested: NestedConfig = cli_nested(prefix="")
 
         # Create temp config file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump({"base_key": "base_value"}, f)
             config_file = f.name
 
@@ -134,12 +129,12 @@ class TestNestedPropertyOverrideBug:
             # BUG: File loading works, but override is NOT applied
             assert config.nested is not None
             assert config.nested.settings is not None
-            assert config.nested.settings["base_key"] == "base_value", (
-                "File loading should work"
-            )
-            assert "override_key" in config.nested.settings, (
-                "BUG: Override key missing - override was not applied"
-            )
+            assert (
+                config.nested.settings["base_key"] == "base_value"
+            ), "File loading should work"
+            assert (
+                "override_key" in config.nested.settings
+            ), "BUG: Override key missing - override was not applied"
             assert config.nested.settings["override_key"] == "override"
         finally:
             Path(config_file).unlink()
@@ -158,7 +153,6 @@ class TestNestedPropertyOverrideBug:
         assert config.settings is not None
         assert config.settings == {"key": "value"}
 
-
     def test_override_only_no_file_no_prefix(self):
         """Test override-only (no file) with no prefix."""
 
@@ -176,7 +170,7 @@ class TestNestedPropertyOverrideBug:
 
         # BUG: data is None instead of {"key": "value"}
         assert config.nested is not None
-        assert config.nested.data is not None, (
-            "BUG: data is None - override without file failed"
-        )
+        assert (
+            config.nested.data is not None
+        ), "BUG: data is None - override without file failed"
         assert config.nested.data == {"key": "value"}

@@ -1100,46 +1100,15 @@ class GenericConfigBuilder:
                 if field_name not in config:
                     config[field_name] = {}
                 try:
-                    self._apply_property_overrides(config[field_name], override_value)
+                    ConfigApplicator.apply_property_overrides(
+                        config[field_name], override_value
+                    )
                 except Exception as e:
                     raise ConfigurationError(
                         f"Failed to apply property overrides for field '{field_name}': {e}"
                     ) from e
 
         return config
-
-    def _apply_property_overrides(
-        self, target_dict: Dict[str, Any], overrides: List[str]
-    ) -> None:
-        """Apply property path overrides to target dictionary."""
-        for override in overrides:
-            if ":" not in override:
-                raise ValueError(
-                    f"Invalid override format: {override} (expected key.path:value)"
-                )
-
-            path, value = override.split(":", 1)
-            self._set_nested_property(target_dict, path, self._parse_value(value))
-
-    def _set_nested_property(
-        self, target: Dict[str, Any], path: str, value: Any
-    ) -> None:
-        """Set nested property using dot notation."""
-        keys = path.split(".")
-        current = target
-
-        # Navigate to parent of target key
-        for key in keys[:-1]:
-            if key not in current:
-                current[key] = {}
-            current = current[key]
-
-        # Set final value
-        current[keys[-1]] = value
-
-    def _parse_value(self, value_str: str) -> Any:
-        """Parse string value (delegates to ConfigApplicator)."""
-        return ConfigApplicator._parse_value(value_str)
 
 
 # Convenience functions
