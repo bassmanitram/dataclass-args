@@ -4,14 +4,14 @@
 
 This project maintains **92.19%** code coverage with comprehensive testing.
 
-## Current Coverage Statistics (v1.4.2)
+## Current Coverage Statistics (v1.4.3)
 
 | Module | Statements | Missing | Branches | Partial | Coverage |
 |--------|------------|---------|----------|---------|----------|
 | `__init__.py` | 7 | 0 | 0 | 0 | **100.00%** |
 | `annotations.py` | 143 | 2 | 42 | 2 | **97.84%** |
 | `append_action.py` | 6 | 0 | 0 | 0 | **100.00%** |
-| `builder.py` | 415 | 29 | 190 | 16 | **91.57%** |
+| `builder.py` | 420 | 29 | 194 | 16 | **91.69%** |
 | `config_applicator.py` | 49 | 0 | 16 | 0 | **100.00%** |
 | `exceptions.py` | 6 | 0 | 0 | 0 | **100.00%** |
 | `file_loading.py` | 40 | 6 | 16 | 1 | **87.50%** |
@@ -19,26 +19,26 @@ This project maintains **92.19%** code coverage with comprehensive testing.
 | `nested_processor.py` | 115 | 14 | 48 | 5 | **88.34%** |
 | `type_inspector.py` | 67 | 6 | 26 | 5 | **86.02%** |
 | `utils.py` | 70 | 6 | 24 | 1 | **92.55%** |
-| **TOTAL** | **927** | **63** | **366** | **30** | **92.19%** |
+| **TOTAL** | **932** | **63** | **370** | **30** | **92.24%** |
 
 ## Test Suite
 
-- **Total Tests:** 424
-- **Test Execution Time:** ~0.65s
+- **Total Tests:** 429
+- **Test Execution Time:** ~0.75s
 - **All Tests Passing:** ✅
 
 ## Coverage Requirements
 
 - **Minimum Required:** 88%
-- **Current Coverage:** 92.19% ✅
+- **Current Coverage:** 92.24% ✅
 - **Target Coverage:** 95%+
 
 ## Recent Improvements (v1.4.2)
 
-- Added 70 new tests (+20%)
+- Added 75 new tests (+21%)
 - TypeInspector: 51% → 86% (+35%)
 - ConfigApplicator: 78% → 100% (+22%)
-- Overall: 88.84% → 92.19% (+3.35%)
+- Overall: 88.84% → 92.24% (+3.40%)
 
 ## Running Coverage Reports
 
@@ -89,13 +89,14 @@ tests/
 ├── test_cli_choices.py         # Choice validation (20 tests)
 ├── test_cli_nested.py          # Nested dataclasses (27 tests)
 ├── test_cli_short.py           # Short options (18 tests)
-├── test_collisions.py          # Collision detection (11 tests) [NEW]
-├── test_config_applicator.py   # Config application (36 tests) [NEW]
+├── test_collisions.py          # Collision detection (10 tests)
+├── test_config_applicator.py   # Config application (36 tests)
 ├── test_config_merging_*.py    # Config merging (10 tests)
 ├── test_description.py         # Help text customization (18 tests)
 ├── test_file_loading.py        # File loading (@file) (22 tests)
+├── test_nested_help_text.py    # Nested help text (5 tests) [NEW v1.4.3]
 ├── test_positional.py          # Positional arguments (38 tests)
-├── test_type_inspector.py      # Type inspection (30 tests) [NEW]
+├── test_type_inspector.py      # Type inspection (30 tests)
 ├── test_utils.py               # File format loading (34 tests)
 └── test_*_override.py          # Property overrides (13 tests)
 ```
@@ -118,5 +119,5 @@ All tests run automatically on:
 
 ---
 
-**Last Updated:** 2025-12-16
-**Version:** 1.4.2
+**Last Updated:** 2024-12-16
+**Version:** 1.4.3

@@ -66,6 +66,31 @@ No migration required. All changes are internal refactoring with full backward c
 
 # Changelog
 
+
+## [1.4.3] - 2024-12-16
+
+### Fixed
+- **Nested field help text** - Nested fields with prefix now show descriptive help text
+  - Before: `--a2a-name A2A_NAME    nested field` (generic, unhelpful)
+  - After: `--a2a-name A2A_NAME    agent.name` (clear context)
+  - Help text now shows `parent.field` format for better UX
+  - Improves discoverability and reduces confusion
+  - Custom help text still takes precedence via `cli_help()`
+
+### Added
+- **New test suite** - `tests/test_nested_help_text.py` (5 tests)
+  - Verifies parent.field format in help text
+  - Tests custom help text override behavior
+  - Tests empty prefix behavior
+  - Tests multiple nested dataclasses
+  - All backward compatibility scenarios covered
+
+### Quality
+- Total tests: 424 → 429 (+5)
+- Coverage: 92.19% maintained
+- All CI checks passing
+- 100% backward compatible
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

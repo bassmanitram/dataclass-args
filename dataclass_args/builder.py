@@ -450,7 +450,10 @@ class GenericConfigBuilder:
                 info = mapping["nested_info"]
                 prefix = mapping["prefix"]
                 if not is_cli_positional(info):
-                    self._add_argument(parser, nested_field, info, cli_name, prefix)
+                    parent = mapping["parent_field"]
+                    self._add_argument(
+                        parser, nested_field, info, cli_name, prefix, parent
+                    )
             else:
                 # Regular field - skip if nested dataclass
                 field_name = mapping["field_name"]
@@ -520,6 +523,7 @@ class GenericConfigBuilder:
         info: Dict[str, Any],
         cli_name: Optional[str] = None,
         prefix: str = "",
+        parent_field: Optional[str] = None,
     ) -> None:
         """
         Add CLI argument for a field (unified handler for flat and nested fields).
@@ -530,6 +534,7 @@ class GenericConfigBuilder:
             info: Field info dict
             cli_name: Pre-computed CLI name (for nested fields), uses info["cli_name"] if None
             prefix: Prefix for nested fields (empty string = no prefix)
+            parent_field: Parent field name for nested fields (for help text context)
         """
         # Boolean fields handled separately
         if info["type"] == bool:
@@ -553,9 +558,12 @@ class GenericConfigBuilder:
 
         # Build help text
         custom_help = get_cli_help(info)
-        help_text = (
-            custom_help if custom_help else ("nested field" if prefix else field_name)
-        )
+        if custom_help:
+            help_text = custom_help
+        elif parent_field:
+            help_text = f"{parent_field}.{field_name}"
+        else:
+            help_text = field_name
         choices = get_cli_choices(info)
 
         # Handle append fields
