@@ -42,6 +42,7 @@ jobs:
 
     - name: Package health check
       run: |
+        pip install build twine
         python -m build
         twine check dist/*
         pip install dist/*.whl
