@@ -38,7 +38,6 @@ Benefits of nested dataclasses:
 - Reusable configuration components
 """
 
-
 from dataclasses import dataclass
 
 from dataclass_args import build_config, cli_help, cli_nested
