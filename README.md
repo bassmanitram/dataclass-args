@@ -23,6 +23,7 @@ Generate command-line interfaces from Python dataclasses.
 - **[File Loading](#file-loadable-parameters)** - Load parameters from files using `@filename` syntax
 - **[Config Merging](#configuration-merging)** - Combine configuration sources with hierarchical overrides
 - **[Flexible Types](#type-support)** - Support for `List`, `Dict`, `Optional`, and custom types
+- **[Field Resolution](#field-resolution)** - Transform config dicts into typed objects with `cli_resolve()`
 - **[Rich Annotations](#combining-annotations)** - Custom help text, exclusions, and combinations
 - **[Minimal Dependencies](#installation)** - Lightweight with optional format support
 ## Quick Start
@@ -809,6 +810,128 @@ $ python app.py \
 - [`examples/nested_short_options.py`](examples/nested_short_options.py) - Short options with nested fields
 
 
+### Field Resolution
+
+Transform configuration dictionaries into typed objects using `cli_resolve()`. This enables a clean factory pattern where config files contain simple dicts, but your application works with rich typed objects.
+
+```python
+from dataclass_args import build_config, cli_resolve, cli_help, combine_annotations
+
+# Your domain types
+class SandboxBase:
+    pass
+
+class DockerSandbox(SandboxBase):
+    def __init__(self, image: str = "python:3.11", memory: str = "512m"):
+        self.image = image
+        self.memory = memory
+
+# Your resolver function (owns all instantiation logic)
+def resolve_sandbox(value):
+    if isinstance(value, dict):
+        sandbox_type = value.get("type", "local")
+        if sandbox_type == "docker":
+            return DockerSandbox(image=value.get("image", "python:3.11"))
+        # ... other types
+    return value  # Pass-through for pre-built objects
+
+# Your config dataclass
+@dataclass
+class AppConfig:
+    app_name: str = "myapp"
+
+    # Field type is the FINAL type (for type checking)
+    # During parsing, treated as dict (supports file paths + property overrides)
+    # After assembly, resolver transforms dict → typed object
+    sandbox: Optional[SandboxBase] = combine_annotations(
+        cli_resolve(resolver=resolve_sandbox),
+        cli_help("Sandbox configuration"),
+        default=None,
+    )
+
+config = build_config(AppConfig)
+```
+
+```bash
+# Load sandbox from a config file
+$ python app.py --sandbox sandbox.yaml
+
+# Load and override a property before resolution
+$ python app.py --sandbox sandbox.yaml --s image:python:3.12
+
+# Or specify in a full config file
+$ python app.py --config app.yaml
+```
+
+**sandbox.yaml:**
+```yaml
+type: docker
+image: python:3.11
+memory: 1g
+```
+
+#### How It Works
+
+1. **Parsing**: Field is treated as a dict field (supports file path loading + property overrides)
+2. **Assembly**: All config sources merge normally (base_configs → config file → CLI)
+3. **Resolution** (Stage 3.8): Resolver function called on non-None values
+4. **Result**: Dict is transformed into the typed object for the dataclass
+
+#### List Fields
+
+`cli_resolve` also works on list fields. The field retains its natural list parsing behavior,
+and the resolver receives the entire assembled list:
+
+```python
+def resolve_plugin_paths(patterns):
+    """Expand glob patterns and load plugin configs."""
+    import glob
+    files = [f for p in patterns for f in glob.glob(p)]
+    return [load_and_create_plugin(f) for f in files]
+
+@dataclass
+class AppConfig:
+    plugins: List[Any] = combine_annotations(
+        cli_resolve(resolver=resolve_plugin_paths),
+        cli_help("Plugin config file patterns"),
+        default_factory=list,
+    )
+```
+
+```bash
+$ python app.py --plugins "plugins/*.json" "extra/*.yaml"
+# resolver receives: ["plugins/*.json", "extra/*.yaml"]
+```
+
+#### Behavior Rules
+
+| Value State | What Happens |
+|-------------|--------------|
+| `None` | Resolver NOT called, field stays `None` |
+| Dict (from config/file) | Resolver called, result assigned to field |
+| Pre-built object (programmatic) | Resolver called, can pass through unchanged |
+| Property overrides on non-dict | `ConfigurationError` raised |
+
+#### Compatibility
+
+- **Works with**: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- **Incompatible with** (on same field): `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
+- **Nested fields**: Allowed in nested dataclasses, but resolver is NOT called (value stays raw)
+
+#### Error Handling
+
+Resolver exceptions are wrapped in `ConfigurationError` with field context:
+```
+ConfigurationError: Failed to resolve field 'sandbox': Unknown sandbox type: invalid
+```
+
+If the resolver itself raises `ConfigurationError`, it's re-raised without wrapping.
+
+**See also:**
+- [`examples/cli_resolve_example.py`](examples/cli_resolve_example.py) - Complete working example
+
+
+
 # config.yaml
 name: "DefaultApp"
 count: 100
@@ -1188,6 +1311,32 @@ logging: LogConfig = cli_nested(default_factory=LogConfig)
 - Automatic collision detection for field names and short options
 - Works seamlessly with config file merging
 
+#### `cli_resolve(resolver, **kwargs)`
+
+Mark a field for post-load resolution via a callable. After the raw value is assembled
+from all configuration sources, the resolver transforms it into the final field value.
+For non-list fields, treated as dict-loadable during parsing (file paths + property overrides).
+For list fields, retains natural list parsing behavior (resolver receives assembled list).
+
+```python
+def resolve_sandbox(value):
+    if isinstance(value, dict):
+        return create_sandbox(**value)
+    return value  # Pass-through for pre-built objects
+
+sandbox: Optional[SandboxBase] = combine_annotations(
+    cli_resolve(resolver=resolve_sandbox),
+    cli_help("Sandbox configuration"),
+    default=None,
+)
+```
+
+**Important:**
+- Resolver is NOT called when value is None
+- Compatible with: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
+- In nested dataclasses: allowed but resolver NOT called (value stays raw)
+
 #### `cli_exclude(**kwargs)`
 
 Exclude fields from CLI argument generation.
@@ -1276,6 +1425,7 @@ Check the [`examples/`](examples/) directory for complete working examples:
 - **`boolean_flags_example.py`** - Boolean flags with `--flag` and `--no-flag`
 - **`cli_choices_example.py`** - Value validation with choices
 - **`cli_short_example.py`** - Short option flags
+- **`cli_resolve_example.py`** - Post-load field resolution with factory pattern
 - **`all_features_example.py`** - All features together
 - And more...
 
@@ -1432,6 +1582,7 @@ from dataclass_args import (
     cli_nested,                  # Nested dataclasses
     cli_exclude,                 # Hide from CLI
     cli_file_loadable,           # @file loading
+    cli_resolve,                 # Post-load resolution
     combine_annotations,         # Combine features
 )
 
@@ -1469,6 +1620,12 @@ class Config:
     # Nested dataclass
     database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
 
+
+    # Resolved field (dict → typed object via resolver)
+    sandbox: Optional[SandboxBase] = combine_annotations(
+        cli_resolve(resolver=resolve_sandbox),
+        default=None,
+    )
 # Build and use
 config = build_config(Config)
 ```

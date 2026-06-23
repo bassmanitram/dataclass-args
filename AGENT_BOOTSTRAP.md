@@ -119,6 +119,12 @@ Things that surprise people:
 6. **Auto prefix uses field name** (v1.4.0):
    - **Why**: `cli_nested()` without prefix uses field name as prefix
    - **Example**: `db: DbConfig = cli_nested()` → fields become `--db-name`, `--db-host`
+
+7. **cli_resolve fields are dual-natured** (v1.5.0):
+   - **Why it's this way**: Field type is `Optional[Sandbox]` but during parsing it's treated as dict
+   - **Common mistake**: Expecting the field to accept complex types directly on CLI
+   - **Pattern**: For non-list fields, library forces `is_dict=True`; for list fields, keeps list behavior. Resolver runs after assembly
+   - **Gotcha**: Property overrides work (modify dict before resolution) but fail on pre-built objects
    - **Override**: Use `prefix="custom"` or `prefix=""` (flat) to control
 
 ---
@@ -191,6 +197,8 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
                     base_configs → Merge → --config file → Merge → CLI args → Merge
                                                               ↓
                                                     Reconstruct Nested Structure
+                                                              ↓
+                                                    Resolve Fields (v1.5.0)
                                                               ↓
                                                     Dataclass(**merged_dict)
 ```
@@ -282,6 +290,16 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 **Symptom**: Short options not working for nested fields (v1.4.0)
 - **Why it happens**: Short options disabled when prefix is set (by design)
 - **Diagnostic**: Check if nested field uses `prefix=""` (flat namespace)
+
+**Symptom**: "cli_resolve cannot be combined with..." error (v1.5.0)
+- **Likely cause**: Using `cli_resolve` together with `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, or `cli_file_loadable`
+- **Diagnostic**: Check field annotations for incompatible combinations
+- **Solution**: Remove incompatible annotation. `cli_resolve` only works with `cli_help`, `cli_short`, `cli_choices`
+
+**Symptom**: "Cannot apply property overrides... not a dict" (v1.5.0)
+- **Likely cause**: Pre-built object in base_configs + CLI property overrides on same field
+- **Diagnostic**: Check if base_configs provides an already-instantiated object AND CLI uses `--abbreviation key:value`
+- **Solution**: Remove pre-built object from base_configs, or don't use property overrides for that field
 - **Solution**: Use `prefix=""` to enable short options, or accept long options only
 
 ---
@@ -325,6 +343,7 @@ Update this bootstrap when:
 - [x] Type system handling changes (new type inspection approach)
 - [x] Configuration philosophy changes (e.g., support config hierarchy like profile-config)
 - [x] **Nested dataclass support added** (v1.4.0 - architectural change)
+- [x] **Post-load resolution added** (v1.5.0 - new pipeline stage, new annotation pattern)
 
 Don't update for:
 - ❌ Individual annotation additions (follow existing pattern)
@@ -335,5 +354,5 @@ Don't update for:
 
 ---
 
-**Last Updated**: 2025-12-12
-**Last Architectural Change**: v1.4.1 - Added property override support for dict fields in nested dataclasses (completes cli_nested feature)
+**Last Updated**: 2026-06-23
+**Last Architectural Change**: v1.5.0 - Added cli_resolve() for post-load field resolution (new pipeline stage 3.8)

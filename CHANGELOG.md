@@ -1,3 +1,104 @@
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.5.0] - 2026-06-23
+
+### Added
+- **Post-Load Field Resolution with `cli_resolve()`** - Transform config values into typed objects
+  - New annotation `cli_resolve(resolver=callable)` marks fields for post-load transformation
+  - After all config assembly (base_configs → config file → CLI), resolver transforms raw value
+  - None bypass: resolver never called when value is None (natural Optional semantics)
+  - Error handling: resolver exceptions wrapped in `ConfigurationError` with field context
+  - Pipeline position: Stage 3.8 (after nested reconstruction, before dataclass creation)
+  - **Dict fields** (default mode for non-list types):
+    - Field treated as dict-loadable during parsing (file paths + property overrides)
+    - Resolver receives assembled dict, returns typed object
+    - Property override protection: raises error for overrides on pre-built (non-dict) objects
+  - **List fields** (automatic for List-typed fields):
+    - Field retains natural list parsing behavior (`nargs` semantics)
+    - Resolver receives the assembled list (not individual elements)
+    - Enables patterns like: accept glob patterns from CLI, expand and resolve in resolver
+    - Example: `files: List[Any] = cli_resolve(resolver=expand_and_load, default_factory=list)`
+  - **Nested dataclass support**:
+    - `cli_resolve` fields inside nested dataclasses are accepted (no error)
+    - Resolver is NOT called by the library for nested fields (value stays raw)
+    - Application can call resolvers explicitly post-construction
+    - Enables dataclasses with `cli_resolve` fields to be reused via `cli_nested()`
+  - Compatible with: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+  - Incompatible with: `cli_positional`, `cli_nested` (same field), `cli_append`, `cli_exclude`, `cli_file_loadable`
+  - Incompatibility validation at init time (fail-fast)
+
+### Examples
+- New example: `examples/cli_resolve_example.py` - Post-load field resolution demonstration
+  - DockerSandbox and LocalSandbox factory pattern
+  - Config file loading with resolution
+  - Property overrides before resolution
+  - Pre-built object pass-through
+  - List field resolution
+
+### Tests
+- Added 51 comprehensive tests in `tests/test_cli_resolve.py`
+  - TestBasicResolve - Dict → object, None bypass, resolver always called
+  - TestConfigFileLoading - File path loading, --config integration
+  - TestPropertyOverrides - Overrides before resolution, non-dict protection
+  - TestPreBuiltObjects - Pass-through, CLI override of pre-built
+  - TestErrorHandling - Error wrapping, ConfigurationError pass-through, invalid resolver
+  - TestCombineAnnotations - cli_help, cli_short, combined
+  - TestOptionalAndRequired - Optional with None, base_configs provided
+  - TestIncompatibleAnnotations - All incompatible combinations + multiple
+  - TestNestedDataclassSupport - Accepted in nested, resolver not called, raw value preserved
+  - TestMetadataAccessors - is_cli_resolve, get_cli_resolver
+  - TestBuildConfigHelperFunction - End-to-end integration
+  - TestMultipleResolveFields - Two resolve fields, independent None bypass
+  - TestConfigMergingWithResolve - Precedence testing
+  - TestEdgeCases - Empty dict, resolver returns None, different types
+  - TestListFieldResolve - List from CLI, base_configs, pre-built objects, empty list, errors
+- All 480 tests passing (429 existing + 51 new)
+- Coverage: 92.92% (up from 92.24%)
+
+### Quality
+- 100% backward compatible - no breaking changes
+- All existing functionality preserved
+- No regressions in existing tests
+- Clean separation of concerns: library provides hook, caller provides logic
+
+### Documentation
+- Updated README.md with "Field Resolution" section (dict and list modes)
+- Updated docs/API.md with `cli_resolve()` API reference
+- Updated AGENT_BOOTSTRAP.md with new feature details
+- Complete example with real-world factory pattern
+
+### Migration
+No migration required. This is a purely additive feature.
+
+## [1.4.3] - 2025-12-18
+
+### Fixed
+- **Nested field help text** - Nested fields with prefix now show descriptive help text
+  - Before: `--a2a-name A2A_NAME    nested field` (generic, unhelpful)
+  - After: `--a2a-name A2A_NAME    agent.name` (clear context)
+  - Help text now shows `parent.field` format for better UX
+  - Improves discoverability and reduces confusion
+  - Custom help text still takes precedence via `cli_help()`
+
+### Added
+- **New test suite** - `tests/test_nested_help_text.py` (5 tests)
+  - Verifies parent.field format in help text
+  - Tests custom help text override behavior
+  - Tests empty prefix behavior
+  - Tests multiple nested dataclasses
+  - All backward compatibility scenarios covered
+
+### Quality
+- Total tests: 424 → 429 (+5)
+- Coverage: 92.19% maintained
+- All CI checks passing
+- 100% backward compatible
+
+
 ## [1.4.2] - 2025-12-16
 
 ### Changed
@@ -32,6 +133,7 @@
 ### Migration
 No migration required. All changes are internal refactoring with full backward compatibility.
 
+
 ## [1.4.1] - 2025-12-12
 
 ### Added
@@ -45,18 +147,8 @@ No migration required. All changes are internal refactoring with full backward c
   - Fully compatible with auto-prefix mode
   - Enables CLI override of nested dict fields without full file replacement
 
-### Examples
-- New test script: `local/test_dict_override_in_nested.py` - Functional demonstration
-
 ### Tests
 - Added 7 new tests in `tests/test_nested_dict_override.py`
-  - Override argument generation with prefix
-  - Override argument generation without prefix
-  - Override parsing with prefix
-  - Override parsing without prefix
-  - Help text verification
-  - Multiple dict fields
-  - Auto-prefix support
 - All 348 tests passing (341 existing + 7 new)
 
 ### Quality
@@ -64,37 +156,6 @@ No migration required. All changes are internal refactoring with full backward c
 - Minimal code change (25 lines in `builder.py`)
 - All existing functionality preserved
 
-# Changelog
-
-
-## [1.4.3] - 2024-12-16
-
-### Fixed
-- **Nested field help text** - Nested fields with prefix now show descriptive help text
-  - Before: `--a2a-name A2A_NAME    nested field` (generic, unhelpful)
-  - After: `--a2a-name A2A_NAME    agent.name` (clear context)
-  - Help text now shows `parent.field` format for better UX
-  - Improves discoverability and reduces confusion
-  - Custom help text still takes precedence via `cli_help()`
-
-### Added
-- **New test suite** - `tests/test_nested_help_text.py` (5 tests)
-  - Verifies parent.field format in help text
-  - Tests custom help text override behavior
-  - Tests empty prefix behavior
-  - Tests multiple nested dataclasses
-  - All backward compatibility scenarios covered
-
-### Quality
-- Total tests: 424 → 429 (+5)
-- Coverage: 92.19% maintained
-- All CI checks passing
-- 100% backward compatible
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.4.0] - 2025-12-12
 
@@ -125,14 +186,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 - Added 24 comprehensive tests in `tests/test_cli_nested.py`
-  - TestBasicNested - Three prefix modes, partial overrides, multiple nested
-  - TestCollisionDetection - Field name and cross-nested collisions
-  - TestShortOptions - Short options with/without prefix, collision detection
-  - TestConfigFileMerging - Base config, CLI overrides, programmatic configs
-  - TestFieldTypes - Lists, booleans, optionals in nested fields
-  - TestIntegrationWithOtherAnnotations - cli_help, cli_choices, combine_annotations
-  - TestEdgeCases - Empty dataclasses, defaults only, positional args errors
-  - TestBuildConfigHelperFunction - Integration testing
 - All 338 tests passing (314 existing + 24 new)
 - Test coverage maintained
 
@@ -146,7 +199,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated README.md with "Nested Dataclasses" section
 - Updated docs/API.md with `cli_nested()` API reference
 - Complete examples with real-world scenarios
-- Clear explanation of prefix modes and short option behavior
+
 
 ## [1.3.0] - 2025-12-04
 
@@ -163,25 +216,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Examples
 - New example: `examples/cli_append_example.py` with 5 practical scenarios
-  - Docker-style configuration (-p HOST CONTAINER, -v SOURCE TARGET, -e KEY VALUE)
-  - File uploads with optional MIME types
-  - Environment variable KEY VALUE pairs
-  - Simple tag collection
-  - Server pool HOST PORT pairs
 
 ### Tests
 - Added 32 comprehensive tests in `tests/test_cli_append.py`
-  - TestBasicAppend - Basic functionality
-  - TestAppendWithNargs - Various nargs values
-  - TestAppendWithTypes - int, float, str types
-  - TestAppendWithChoices - Combined with cli_choices()
-  - TestAppendRealWorldExamples - Practical scenarios
-  - TestAppendEdgeCases - Error conditions
-  - TestAppendCombinedAnnotations - With other annotations
-  - TestAppendValidation - Custom validation
-  - TestAppendIntegration - Complex configurations
-  - TestAppendHelp - Help text generation
-  - TestAppendTyping - Type correctness
 - All 306 tests passing (274 existing + 32 new)
 - Test coverage: 92.96%
 
@@ -190,138 +227,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All existing functionality preserved
 - No regressions in existing tests
 
-### Documentation
-- Updated README.md with repeatable options section
-- Added API reference for `cli_append()`
-- Added usage examples and patterns
-- Updated feature list
 
-
-## [1.2.2] - 2024-11-20
+## [1.2.2] - 2025-11-20
 
 ### Fixed
 - **Boolean fields from base_configs now work correctly**
   - Fixed critical bug where boolean values from `base_configs` dict/files were always ignored
   - Boolean fields now properly respect configuration hierarchy: `base_configs` < `--config` < CLI
-  - CLI flags correctly override `base_configs`; unspecified flags preserve `base_configs` values
   - Technical: Changed `_add_boolean_argument()` to use `argparse.SUPPRESS` instead of `parser.set_defaults()`
-  - This resolves the known limitation documented in v1.2.0
-- Added 22 comprehensive tests in `tests/test_boolean_base_configs.py` covering all boolean scenarios
 
 ### Quality
 - All 274 tests passing (252 existing + 22 new)
 - Test coverage: 93.89%
-- 100% backward compatible - no breaking changes
-
-### Migration
-No migration required. This fix only affects boolean fields used with `base_configs` parameter.
-If you were working around this bug, you can now remove workarounds.
+- 100% backward compatible
 
 
-## [1.2.1] - 2024-11-18
+## [1.2.1] - 2025-11-18
 
 ### Added
 - **Optional `description` parameter** for custom ArgumentParser help text
-  - `GenericConfigBuilder.__init__()` now accepts optional `description` parameter
   - `build_config()` and `build_config_from_cli()` accept optional `description` parameter
-  - Allows customization of help text instead of generic "Build {ClassName} from CLI" format
-  - Example: `build_config(ServerConfig, description="Server configuration management tool")`
-- New test suite: `tests/test_description.py` with 18 tests covering the description parameter
 
 ### Quality
 - All 252 tests passing (234 existing + 18 new)
-- Test coverage: 93.90%
 - 100% backward compatible
 
-### Migration
-No migration required. This is an additive feature with no breaking changes.
 
-
-## [1.2.0] - 2024-11-12
+## [1.2.0] - 2025-11-12
 
 ### Added
 - **Enhanced `base_configs` parameter** with comprehensive support for multiple configuration sources
   - Single file path: `base_configs='defaults.yaml'`
   - Single dict: `base_configs={'debug': True}`
   - List of mixed sources: `base_configs=['base.yaml', {'env': 'prod'}, 'overrides.json']`
-  - Files in list are loaded and applied sequentially
-  - Dicts in list are applied directly
-  - Enables flexible configuration composition and layering
 
 ### Changed
 - **Improved configuration merge hierarchy** with clear precedence:
   1. Programmatic `base_configs` (lowest priority)
   2. Config file from `--config` argument
   3. CLI argument overrides (highest priority)
-- Builder methods simplified:
-  - `_normalize_base_configs()` - Normalize input to list of dicts
-  - `_apply_base_configs()` - Sequential merge of base configs
-  - `_apply_config_file()` - Merge --config file
-  - `_apply_cli_overrides()` - Apply CLI args
-
-### Tests
-- Added 20 new tests in `tests/test_config_merging_simple.py`
-- All 234 tests passing (214 existing + 20 new)
-- Test coverage: 94.15%
-
-### Migration
-Fully backward compatible. Existing code using string or dict for `base_configs` continues to work.
-The new list format is optional and additive.
 
 ### Known Limitations
-- Boolean values from `base_configs` dict may not apply correctly in all cases (to be fixed in 1.2.2)
+- Boolean values from `base_configs` dict may not apply correctly in all cases (fixed in 1.2.2)
 
 
-## [1.1.0] - 2024-11-02
+## [1.1.0] - 2025-11-03
 
 ### Removed
-- **Simplified API** - Removed unused optional parameters from core functions:
-  - Removed `exclude_fields` parameter from `build_config()` and `build_config_from_cli()`
-  - Removed `field_filter` parameter from `GenericConfigBuilder.__init__()`
-  - These parameters were never documented and added unnecessary complexity
+- **Simplified API** - Removed unused optional parameters from core functions
   - Field exclusion is now exclusively done via `cli_exclude()` annotation
-  - This change reduces API surface area by ~80% while maintaining all functionality
-
-### Changed
-- Streamlined builder initialization and configuration logic
-- Improved code clarity and maintainability
-
-### Quality
-- All 224 tests passing
-- Test coverage: 94.29%
-- 100% backward compatible for documented features
-
-### Migration
-If you were using undocumented `exclude_fields` or `field_filter` parameters:
-- Replace `exclude_fields=['field1', 'field2']` with `field1: str = cli_exclude()` annotation
-- Replace `field_filter` callback with `cli_exclude()` on specific fields
-- This provides more explicit and maintainable field exclusion
 
 
-## [1.0.1] - 2024-11-02
+## [1.0.1] - 2025-11-02
 
 ### Added
-- **Home directory expansion for file loading**
-  - `@~/file.txt` expands to user's home directory
-  - `@~alice/file.txt` expands to alice's home directory
-  - Applies to all file-loadable fields marked with `cli_file_loadable()`
-
-### Tests
-- Added 10 new tests in `tests/test_file_loading.py`
-- All 234 tests passing (224 existing + 10 new)
-- Test coverage: 94.35%
-
-### Migration
-No migration required. This is an additive feature.
+- **Home directory expansion for file loading** (`@~/file.txt`, `@~alice/file.txt`)
 
 
-## [1.0.0] - 2024-01-31
+## [1.0.0] - 2025-11-01
 
 ### First Stable Release
-
-This release marks the 1.0 stable version with a complete, tested, and documented feature set.
-
-### Features
 - Automatic CLI generation from dataclass definitions
 - Type-safe argument parsing for standard Python types
 - Short-form options with `cli_short()`
@@ -333,20 +298,5 @@ This release marks the 1.0 stable version with a complete, tested, and documente
 - Support for `List`, `Dict`, `Optional`, and custom types
 - Custom help text and field exclusion
 - Comprehensive test coverage (>92%)
-
-### Quality
-- 216 tests passing
-- Test coverage: ~92%
 - Cross-platform support (Linux, macOS, Windows)
 - Python 3.8+ support
-
-### Documentation
-- Complete README with examples
-- API reference
-- Multiple working examples
-- Contributing guidelines
-
-### Stability
-- API is now frozen following semantic versioning
-- No breaking changes in 1.x series
-- Deprecated features will be maintained until 2.0

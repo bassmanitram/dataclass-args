@@ -31,11 +31,14 @@ from .annotations import (
     get_cli_nested_prefix,
     get_cli_positional_metavar,
     get_cli_positional_nargs,
+    get_cli_resolver,
     get_cli_short,
     is_cli_append,
     is_cli_excluded,
+    is_cli_file_loadable,
     is_cli_nested,
     is_cli_positional,
+    is_cli_resolve,
 )
 from .append_action import RangeAppendAction
 from .config_applicator import ConfigApplicator
@@ -63,6 +66,7 @@ class GenericConfigBuilder:
     - Hierarchical merging of configuration sources
     - Field filtering via cli_exclude() annotations
     - Append action for repeatable options
+    - Post-load resolution via cli_resolve() annotations
     """
 
     def __init__(
@@ -177,6 +181,18 @@ class GenericConfigBuilder:
                 "field_obj": field_obj,  # Include field object for metadata access
             }
 
+            # Check for cli_resolve and validate/force appropriate behavior
+            temp_info = {"field_obj": field_obj}
+            if is_cli_resolve(temp_info):
+                self._validate_resolve_compatibility(field_obj, temp_info)
+                if is_list:
+                    # List field: keep list behavior, resolver transforms entire list
+                    pass
+                else:
+                    # Non-list field: force dict behavior (file path + overrides)
+                    field_info["is_dict"] = True
+                    field_info["is_list"] = False
+
             # Only include field if it passes filtering
             if self._should_include_field(field_obj.name, field_info):
                 fields_info[field_obj.name] = field_info
@@ -185,6 +201,37 @@ class GenericConfigBuilder:
         self._validate_positional_arguments(fields_info)
 
         return fields_info
+
+    def _validate_resolve_compatibility(
+        self, field_obj: Any, temp_info: Dict[str, Any]
+    ) -> None:
+        """
+        Validate that cli_resolve is not combined with incompatible annotations.
+
+        Args:
+            field_obj: The dataclass field object
+            temp_info: Temporary field info dict for metadata access
+
+        Raises:
+            ConfigBuilderError: If incompatible annotations are detected
+        """
+        incompatible = []
+        if is_cli_positional(temp_info):
+            incompatible.append("cli_positional")
+        if is_cli_nested(temp_info):
+            incompatible.append("cli_nested")
+        if is_cli_append(temp_info):
+            incompatible.append("cli_append")
+        if is_cli_excluded(temp_info):
+            incompatible.append("cli_exclude")
+        if is_cli_file_loadable(temp_info):
+            incompatible.append("cli_file_loadable")
+
+        if incompatible:
+            raise ConfigBuilderError(
+                f"Field '{field_obj.name}': cli_resolve cannot be combined with "
+                f"{', '.join(incompatible)}"
+            )
 
     def _validate_positional_arguments(
         self, fields_info: Dict[str, Dict[str, Any]]
@@ -887,6 +934,44 @@ class GenericConfigBuilder:
                         f"Each occurrence must have between {min_args} and {max_args} argument(s)."
                     )
 
+    def _resolve_fields(self, config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Stage 3.8: Apply resolver functions to cli_resolve fields.
+
+        For each field annotated with cli_resolve, calls the resolver function
+        on the assembled raw value. Skips None values (resolver not called).
+
+        Args:
+            config_dict: Configuration dictionary after all merging stages
+
+        Returns:
+            Configuration dictionary with resolved field values
+
+        Raises:
+            ConfigurationError: If resolver raises an exception (wraps non-ConfigurationError)
+        """
+        for field_name, info in self._config_fields.items():
+            if not is_cli_resolve(info):
+                continue
+
+            value = config_dict.get(field_name)
+            if value is None:
+                continue  # None bypass: resolver never called for None
+
+            resolver = get_cli_resolver(info)
+            if resolver is None:
+                continue  # pragma: no cover - safety guard for mypy
+            try:
+                config_dict[field_name] = resolver(value)
+            except ConfigurationError:
+                raise  # Re-raise without wrapping
+            except Exception as e:
+                raise ConfigurationError(
+                    f"Failed to resolve field '{field_name}': {e}"
+                ) from e
+
+        return config_dict
+
     def build_config(
         self,
         args: argparse.Namespace,
@@ -949,6 +1034,10 @@ class GenericConfigBuilder:
 
         # Stage 3.75: Validate append field ranges (if min_args/max_args specified)
         self._validate_append_ranges(config_dict)
+
+        # Stage 3.8: Resolve fields (cli_resolve post-load transformation)
+        config_dict = self._resolve_fields(config_dict)
+
         # Stage 4: Create and return dataclass instance
         try:
             return self.config_class(**config_dict)
@@ -1105,6 +1194,15 @@ class GenericConfigBuilder:
 
             # Apply property overrides for dict fields
             if info["is_dict"] and override_value:
+                # Protection for cli_resolve fields with pre-built objects
+                if is_cli_resolve(info):
+                    existing = config.get(field_name)
+                    if existing is not None and not isinstance(existing, dict):
+                        raise ConfigurationError(
+                            f"Cannot apply property overrides to field '{field_name}': "
+                            f"value is already a {type(existing).__name__}, not a dict."
+                        )
+
                 if field_name not in config:
                     config[field_name] = {}
                 try:
