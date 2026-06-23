@@ -6,7 +6,7 @@ be excluded from CLI argument generation or have special behaviors.
 """
 
 from dataclasses import field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # ============================================================================
 # Unified Metadata Accessor
@@ -112,66 +112,12 @@ def cli_nested(prefix: Optional[str] = None, **kwargs) -> Any:
     Args:
         prefix: Prefix for nested field CLI arguments:
                 - "" (empty string): No prefix, flatten completely
-                - "custom": Use custom prefix (e.g., "w" → --w-field)
-                - None (default): Auto-prefix with field name (e.g., "wrapper" → --wrapper-field)
+                - "custom": Use custom prefix (e.g., "w" -> --w-field)
+                - None (default): Auto-prefix with field name (e.g., "wrapper" -> --wrapper-field)
         **kwargs: Additional field parameters (default, default_factory, etc.)
 
     Returns:
         Field object with cli_nested metadata
-
-    Examples:
-        No prefix (cleanest, requires no collisions):
-
-        >>> @dataclass
-        ... class WrapperConfig:
-        ...     retry_count: int = 3
-        ...     timeout: int = 30
-        >>>
-        >>> @dataclass
-        ... class MyAppConfig:
-        ...     app_name: str
-        ...     wrapper: WrapperConfig = cli_nested(prefix="")
-
-        CLI: --app-name "MyApp" --retry-count 5 --timeout 60
-        Result: config.wrapper.retry_count == 5
-
-        Custom short prefix (safe, concise):
-
-        >>> @dataclass
-        ... class MyAppConfig:
-        ...     app_name: str
-        ...     wrapper: WrapperConfig = cli_nested(prefix="w")
-
-        CLI: --app-name "MyApp" --w-retry-count 5 --w-timeout 60
-        Result: config.wrapper.timeout == 60
-
-        Auto-prefix with field name (explicit):
-
-        >>> @dataclass
-        ... class MyAppConfig:
-        ...     app_name: str
-        ...     wrapper: WrapperConfig = cli_nested()
-
-        CLI: --app-name "MyApp" --wrapper-retry-count 5
-        Result: config.wrapper.retry_count == 5
-
-        Multiple nested dataclasses:
-
-        >>> @dataclass
-        ... class RetryConfig:
-        ...     max_attempts: int = 3
-        >>>
-        >>> @dataclass
-        ... class LoggingConfig:
-        ...     level: str = "INFO"
-        >>>
-        >>> @dataclass
-        ... class MyAppConfig:
-        ...     app_name: str
-        ...     retry: RetryConfig = cli_nested(prefix="r")
-        ...     logging: LoggingConfig = cli_nested(prefix="log")
-
-        CLI: --app-name "MyApp" --r-max-attempts 5 --log-level DEBUG
 
     Note:
         - When prefix="", collision detection ensures no field name conflicts
@@ -263,20 +209,8 @@ def cli_choices(choices: List[Any], **kwargs) -> Any:
     Example:
         @dataclass
         class Config:
-            # Simple choices
             environment: str = cli_choices(['dev', 'staging', 'prod'])
             size: str = cli_choices(['small', 'medium', 'large'], default='medium')
-
-            # Combined with other annotations
-            region: str = combine_annotations(
-                cli_short('r'),
-                cli_choices(['us-east-1', 'us-west-2', 'eu-west-1']),
-                cli_help("AWS region"),
-                default='us-east-1'
-            )
-
-        # Usage: --environment prod --size large --region us-west-2
-        # Invalid: --environment invalid  # Error with valid choices shown
     """
     if not choices:
         raise ValueError("cli_choices requires at least one choice")
@@ -302,37 +236,6 @@ def cli_file_loadable(**kwargs) -> Any:
 
     Returns:
         Field object with file-loadable metadata
-
-    Examples:
-        Basic usage:
-
-        >>> @dataclass
-        ... class Config:
-        ...     message: str = cli_file_loadable()
-        ...     system_prompt: str = cli_file_loadable(default="You are a helpful assistant.")
-
-        This generates fields with metadata:
-            message:
-                metadata={'cli_file_loadable': True}
-            system_prompt:
-                default="You are a helpful assistant."
-                metadata={'cli_file_loadable': True}
-
-        CLI usage:
-            # Literal value
-            --message "Hello, World!"
-
-            # Load from absolute path
-            --message "@/path/to/file.txt"
-
-            # Load from home directory
-            --message "@~/messages/welcome.txt"
-
-            # Load from user's home
-            --message "@~alice/shared/message.txt"
-
-            # Load from relative path
-            --message "@data/message.txt"
 
     Note:
         Only fields marked with cli_file_loadable() will process '@' as a file loading trigger.
@@ -378,63 +281,7 @@ def cli_append(
     Returns:
         Field object with append metadata
 
-    Examples:
-        Basic append with single values:
-
-        >>> @dataclass
-        ... class Config:
-        ...     tags: List[str] = cli_append()
-
-        CLI: -t python -t cli -t dataclass
-        Result: ['python', 'cli', 'dataclass']
-
-        Append with pairs (nargs=2):
-
-        >>> @dataclass
-        ... class Config:
-        ...     files: List[List[str]] = cli_append(nargs=2)
-
-        CLI: -f file1.txt text/plain -f file2.jpg image/jpeg
-        Result: [['file1.txt', 'text/plain'], ['file2.jpg', 'image/jpeg']]
-
-        Append with variable args (nargs='+'):
-
-        >>> @dataclass
-        ... class Config:
-        ...     groups: List[List[str]] = cli_append(nargs='+')
-
-        CLI: -g file1 file2 -g file3 -g file4 file5 file6
-        Result: [['file1', 'file2'], ['file3'], ['file4', 'file5', 'file6']]
-
-        Combined with other annotations:
-
-        >>> @dataclass
-        ... class Config:
-        ...     files: List[List[str]] = combine_annotations(
-        ...         cli_short('f'),
-        ...         cli_append(nargs='+'),
-        ...         cli_help("File with optional MIME type"),
-        ...         default_factory=list
-        ...     )
-
-        CLI: -f doc.pdf application/pdf -f image.png -f video.mp4 video/mp4
-        Result: [['doc.pdf', 'application/pdf'], ['image.png'], ['video.mp4', 'video/mp4']]
-
-        With metavar for better help text:
-
-        >>> @dataclass
-        ... class Config:
-        ...     files: List[List[str]] = combine_annotations(
-        ...         cli_short('f'),
-        ...         cli_append(nargs='+', metavar="FILE [MIMETYPE]"),
-        ...         cli_help("File with optional MIME type"),
-        ...         default_factory=list
-        ...     )
-
     Note:
-        "Nested dataclass fields are not allowed within nested dataclasses. "
-        "Only use cli_nested() at the top level."
-    )
         - Always use default_factory=list for append fields
         - Cannot be combined with cli_positional()
     """
@@ -480,6 +327,86 @@ def cli_append(
     if "help" in field_kwargs:
         metadata["cli_help"] = field_kwargs.pop("help")
 
+    field_kwargs["metadata"] = metadata
+    return field(**field_kwargs)
+
+
+def cli_resolve(resolver: Callable[[Any], Any], **kwargs) -> Any:
+    """
+    Mark a field for post-load resolution.
+
+    After the raw value is assembled from all configuration sources (base_configs,
+    config file, CLI arguments), the resolver function transforms it into the
+    final field value.
+
+    For non-list fields: treated as dict-loadable during parsing (supports file
+    paths and property overrides), regardless of declared type annotation.
+
+    For list fields: retains natural list parsing behavior (nargs), and the
+    resolver receives the assembled list.
+
+    Args:
+        resolver: Callable that transforms raw value -> final value.
+                  NOT called if raw value is None.
+                  Should handle pass-through for pre-built objects if needed.
+        **kwargs: Additional field parameters (default, default_factory, etc.)
+
+    Returns:
+        Field object with resolver metadata
+
+    Raises:
+        ValueError: If resolver is not callable
+
+    Examples:
+        Dict field (loaded from config file):
+
+        >>> def resolve_sandbox(value):
+        ...     if isinstance(value, dict):
+        ...         sandbox_type = value.pop("type")
+        ...         return create_sandbox(sandbox_type, **value)
+        ...     return value  # Pre-built object pass-through
+        >>>
+        >>> @dataclass
+        ... class AppConfig:
+        ...     sandbox: Optional[SandboxBase] = combine_annotations(
+        ...         cli_resolve(resolver=resolve_sandbox),
+        ...         cli_help("Sandbox configuration"),
+        ...         default=None,
+        ...     )
+
+        List field (parsed from CLI values):
+
+        >>> def resolve_paths(value):
+        ...     if isinstance(value, list):
+        ...         return [expand_glob(v) for v in value]
+        ...     return value
+        >>>
+        >>> @dataclass
+        ... class Config:
+        ...     files: List[str] = combine_annotations(
+        ...         cli_resolve(resolver=resolve_paths),
+        ...         default_factory=list,
+        ...     )
+
+    Note:
+        - Compatible with: cli_help, cli_short, cli_choices, combine_annotations
+        - Incompatible with: cli_positional, cli_nested, cli_append,
+          cli_exclude, cli_file_loadable
+        - In nested dataclasses: accepted but resolver is NOT called (value stays raw)
+        - Resolver exceptions are wrapped in ConfigurationError with field context
+        - ConfigurationError raised by resolver is re-raised without wrapping
+        - For list fields: resolver receives the full list (not individual elements)
+        - None bypass: resolver never called when value is None
+    """
+    if not callable(resolver):
+        raise ValueError(
+            f"cli_resolve: 'resolver' must be callable, got {type(resolver).__name__}"
+        )
+
+    field_kwargs = kwargs.copy()
+    metadata = field_kwargs.pop("metadata", {})
+    metadata["cli_resolve"] = True
+    metadata["cli_resolver"] = resolver
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
 
@@ -555,60 +482,6 @@ def cli_positional(
     Returns:
         Field object with positional metadata
 
-    Examples:
-        @dataclass
-        class CopyArgs:
-            # Required positional
-            source: str = cli_positional(help="Source file")
-            dest: str = cli_positional(help="Destination file")
-
-            # Optional flag
-            recursive: bool = cli_short('r', default=False)
-
-        # Usage: prog source.txt dest.txt -r
-
-        @dataclass
-        class GitCommit:
-            # Required command
-            command: str = cli_positional(help="Git command")
-
-            # Variable files (must be last!)
-            files: List[str] = cli_positional(nargs='+', help="Files to commit")
-
-            # Optional message
-            message: str = cli_short('m', default="")
-
-        # Usage: prog commit file1.py file2.py -m "Message"
-
-        @dataclass
-        class PlotPoint:
-            # Exact count
-            coordinates: List[float] = cli_positional(
-                nargs=2,
-                metavar='X Y',
-                help="X and Y coordinates"
-            )
-
-            # Optional label
-            label: str = cli_positional(nargs='?', default='', help="Point label")
-
-        # Usage: prog 1.5 2.5 "Point A"
-        # Usage: prog 1.5 2.5  # Uses default label
-
-        @dataclass
-        class Convert:
-            # With combine_annotations
-            input: str = combine_annotations(
-                cli_positional(),
-                cli_help("Input file to convert")
-            )
-
-            output: str = combine_annotations(
-                cli_positional(nargs='?'),
-                cli_help("Output file (default: stdout)"),
-                default='stdout'
-            )
-
     See Also:
         POSITIONAL_LIST_CONFLICTS.md for detailed discussion of constraints
     """
@@ -675,6 +548,16 @@ def is_cli_append(field_info: Dict[str, Any]) -> bool:
 def is_cli_positional(field_info: Dict[str, Any]) -> bool:
     """Check if a field is marked as a positional CLI argument."""
     return _FieldMetadata.get_bool(field_info, "cli_positional")
+
+
+def is_cli_resolve(field_info: Dict[str, Any]) -> bool:
+    """Check if a field is marked for post-load resolution."""
+    return _FieldMetadata.get_bool(field_info, "cli_resolve")
+
+
+def get_cli_resolver(field_info: Dict[str, Any]) -> Optional[Callable]:
+    """Get the resolver callable for a cli_resolve field."""
+    return _FieldMetadata.get(field_info, "cli_resolver")
 
 
 def get_cli_short(field_info: Dict[str, Any]) -> Optional[str]:

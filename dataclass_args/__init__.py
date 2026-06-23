@@ -11,6 +11,7 @@ with advanced features including:
 - Configuration file merging with CLI overrides
 - Hierarchical property overrides for dictionary fields
 - Nested dataclass flattening for complex configurations
+- Post-load field resolution via resolver functions
 - Comprehensive validation and error handling
 - Automatic help text generation
 
@@ -57,6 +58,24 @@ Nested Dataclass Usage:
 
     # Usage: --app-name MyApp --w-retry-count 5 --w-timeout 60
     config = build_config(AppConfig)
+
+Resolver Usage:
+    from dataclass_args import cli_resolve, combine_annotations
+
+    def resolve_backend(value):
+        if isinstance(value, dict):
+            return create_backend(**value)
+        return value
+
+    @dataclass
+    class AppConfig:
+        backend: Optional[Backend] = combine_annotations(
+            cli_resolve(resolver=resolve_backend),
+            default=None,
+        )
+
+    # Usage: --backend backend.yaml --b type:redis
+    config = build_config(AppConfig)
 """
 
 from .annotations import (
@@ -68,6 +87,7 @@ from .annotations import (
     cli_include,
     cli_nested,
     cli_positional,
+    cli_resolve,
     cli_short,
     combine_annotations,
     get_cli_append_max_args,
@@ -78,6 +98,7 @@ from .annotations import (
     get_cli_nested_prefix,
     get_cli_positional_metavar,
     get_cli_positional_nargs,
+    get_cli_resolver,
     get_cli_short,
     is_cli_append,
     is_cli_excluded,
@@ -85,13 +106,14 @@ from .annotations import (
     is_cli_included,
     is_cli_nested,
     is_cli_positional,
+    is_cli_resolve,
 )
 from .builder import GenericConfigBuilder, build_config, build_config_from_cli
 from .exceptions import ConfigBuilderError, ConfigurationError, FileLoadingError
 from .file_loading import is_file_loadable_value, load_file_content
 from .utils import load_structured_file
 
-__version__ = "1.4.3"
+__version__ = "1.5.0"
 
 __all__ = [
     # Main API
@@ -108,6 +130,7 @@ __all__ = [
     "cli_nested",
     "cli_positional",
     "cli_append",
+    "cli_resolve",
     "combine_annotations",
     "get_cli_short",
     "get_cli_choices",
@@ -118,12 +141,14 @@ __all__ = [
     "get_cli_append_metavar",
     "get_cli_append_min_args",
     "get_cli_append_max_args",
+    "get_cli_resolver",
     "is_cli_file_loadable",
     "is_cli_excluded",
     "is_cli_included",
     "is_cli_nested",
     "is_cli_positional",
     "is_cli_append",
+    "is_cli_resolve",
     # File loading
     "load_file_content",
     "is_file_loadable_value",
