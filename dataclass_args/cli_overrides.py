@@ -8,7 +8,8 @@ This module handles stages 3-4 of the config resolution pipeline:
 Responsibilities:
     - Get CLI values from argparse.Namespace
     - Apply field-type-specific processing (lists, dicts, scalars)
-    - Load files for dict fields (.json/.yaml/.yml/.toml paths)
+    - Load files for dict fields (.json/.yaml/.yml/.toml paths) and combine them
+      with the existing value: one-level (default) or deep per merge_strategy
     - Process @file references for cli_file_loadable fields
     - Apply property overrides (--field-prop) to dict fields
 """
@@ -16,11 +17,12 @@ Responsibilities:
 import argparse
 from typing import Any, Dict
 
-from .annotations import is_cli_resolve
 from .config_applicator import ConfigApplicator
 from .exceptions import ConfigurationError
 from .file_loading import process_file_loadable_value
-from .utils import load_structured_file
+from .merge_strategy import MergeContext, combine_dicts
+from .provenance import CLI_LAYER, override_observer
+from .utils import fresh_field_default, load_structured_file, looks_like_structured_file
 
 
 class CliOverrideProcessor:
@@ -44,7 +46,10 @@ class CliOverrideProcessor:
         self.config_fields = config_fields
 
     def apply_cli_overrides(
-        self, config: Dict[str, Any], args: argparse.Namespace
+        self,
+        config: Dict[str, Any],
+        args: argparse.Namespace,
+        ctx: MergeContext = MergeContext(),
     ) -> Dict[str, Any]:
         """
         Apply CLI argument overrides to configuration.
@@ -52,6 +57,7 @@ class CliOverrideProcessor:
         Args:
             config: Current configuration dictionary
             args: Parsed CLI arguments
+            ctx: Merge context (default: shallow)
 
         Returns:
             Final configuration dictionary with CLI overrides applied
@@ -71,9 +77,11 @@ class CliOverrideProcessor:
 
             cli_value = self._get_cli_value(args, field_name)
             if cli_value is not None:
-                self._apply_field_override(config, field_name, info, cli_value)
+                self._apply_field_override(config, field_name, info, cli_value, ctx)
 
-            self._apply_property_overrides_for_field(config, field_name, info, args)
+            self._apply_property_overrides_for_field(
+                config, field_name, info, args, ctx
+            )
 
         return config
 
@@ -88,16 +96,25 @@ class CliOverrideProcessor:
         field_name: str,
         info: Dict[str, Any],
         cli_value: Any,
+        ctx: MergeContext = MergeContext(),
     ) -> None:
         """Apply CLI override for a field based on its type."""
         if info["is_list"]:
             self._apply_list_override(config, field_name, cli_value)
         elif info["is_dict"]:
             # Dict field without cli_resolve: load from file path (string) or use dict directly
-            self._apply_dict_override(config, field_name, cli_value)
+            self._apply_dict_override(config, field_name, cli_value, ctx)
+            return
         else:
             # Scalar field OR cli_resolve field: pass through (handles @file, scalars, and resolver inputs)
             self._apply_scalar_override(config, field_name, info, cli_value)
+        self._record_cli(ctx, field_name, config[field_name])
+
+    @staticmethod
+    def _record_cli(ctx: MergeContext, field_name: str, value: Any) -> None:
+        """Record a CLI-supplied value for provenance (a no-op when it's off)."""
+        if ctx.recorder is not None:
+            ctx.recorder.record_value(CLI_LAYER, (field_name,), value)
 
     def _apply_list_override(
         self, config: Dict[str, Any], field_name: str, cli_value: Any
@@ -109,36 +126,44 @@ class CliOverrideProcessor:
         config[field_name] = cli_value
 
     def _apply_dict_override(
-        self, config: Dict[str, Any], field_name: str, cli_value: Any
+        self,
+        config: Dict[str, Any],
+        field_name: str,
+        cli_value: Any,
+        ctx: MergeContext = MergeContext(),
     ) -> None:
-        """Apply dict override - load from file if string, use directly if dict."""
+        """
+        Apply dict override - load from file if string, use directly if dict.
+
+        A dict (or loaded file) is combined with the existing dict value using
+        the build's merge strategy: one-level (default) or deep.
+        """
         try:
             if isinstance(cli_value, dict):
-                # Already a dict (from programmatic usage) - use directly (no merging for cli_resolve)
+                # Already a dict (programmatic use or a nested route): combined with the existing value below
                 dict_config = cli_value
             elif isinstance(cli_value, str):
                 # String value - try to load as file, but if looks like non-file string, pass through
                 # Check if it looks like a file path (has common config file extension)
-                looks_like_file = any(
-                    cli_value.endswith(ext)
-                    for ext in [".json", ".yaml", ".yml", ".toml"]
-                )
-                if looks_like_file:
+                if looks_like_structured_file(cli_value):
                     # Intended as file path - load it (will error if not found)
                     dict_config = load_structured_file(cli_value)
                 else:
                     # Plain string value - pass through directly (for resolvers that accept strings)
                     config[field_name] = cli_value
+                    self._record_cli(ctx, field_name, cli_value)
                     return
             else:
                 # Unexpected type - use as-is
                 config[field_name] = cli_value
+                self._record_cli(ctx, field_name, cli_value)
                 return
 
+            # Provenance records what the CLI supplied (the loaded dict), not the merge
+            self._record_cli(ctx, field_name, dict_config)
             existing = config.get(field_name, {})
             if isinstance(existing, dict):
-                existing.update(dict_config)
-                config[field_name] = existing
+                config[field_name] = combine_dicts(existing, dict_config, ctx)
             else:
                 config[field_name] = dict_config
         except Exception as e:
@@ -167,12 +192,29 @@ class CliOverrideProcessor:
                 f"Failed to process field '{field_name}': {e}"
             ) from e
 
+    @staticmethod
+    def _property_override_target(
+        config: Dict[str, Any], field_name: str, info: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Choose the dict that property overrides edit.
+
+        The layer value if present, a fresh copy of the dataclass default if no
+        layer set the field, and an empty dict after an explicit None.
+        """
+        if field_name not in config:
+            default = fresh_field_default(info["field_obj"])
+            return default if isinstance(default, dict) else {}
+        existing = config[field_name]
+        return {} if existing is None else existing
+
     def _apply_property_overrides_for_field(
         self,
         config: Dict[str, Any],
         field_name: str,
         info: Dict[str, Any],
         args: argparse.Namespace,
+        ctx: MergeContext = MergeContext(),
     ) -> None:
         """Apply property overrides for dict fields."""
         if not info["is_dict"]:
@@ -183,22 +225,21 @@ class CliOverrideProcessor:
         if not override_value:
             return
 
-        # Protection for cli_resolve fields with pre-built objects
-        if is_cli_resolve(info):
-            existing = config.get(field_name)
-            if existing is not None and not isinstance(existing, dict):
-                raise ConfigurationError(
-                    f"Cannot apply property overrides to field '{field_name}': "
-                    f"value is already a {type(existing).__name__}, not a dict."
-                )
+        # Protection for dict fields holding pre-built objects or plain strings
+        existing = config.get(field_name)
+        if existing is not None and not isinstance(existing, dict):
+            raise ConfigurationError(
+                f"Cannot apply property overrides to field '{field_name}': "
+                f"value is already a {type(existing).__name__}, not a dict."
+            )
 
-        if field_name not in config:
-            config[field_name] = {}
+        config[field_name] = self._property_override_target(config, field_name, info)
+
+        target = config[field_name]
+        observer = override_observer(ctx, (field_name,), target)
 
         try:
-            ConfigApplicator.apply_property_overrides(
-                config[field_name], override_value
-            )
+            ConfigApplicator.apply_property_overrides(target, override_value, observer)
         except Exception as e:
             raise ConfigurationError(
                 f"Failed to apply property overrides for field '{field_name}': {e}"

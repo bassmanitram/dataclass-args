@@ -4,7 +4,8 @@ Orchestrator for dataclass-to-CLI generation.
 GenericConfigBuilder ties together the three processing phases:
     1. FieldAnalyzer  — Inspect dataclass, produce field_info dicts
     2. ArgumentRegistry — Register field_info as argparse arguments
-    3. ConfigResolver — Merge config sources, resolve, instantiate
+    3. ConfigResolver — Merge config sources (one-level by default, or deep
+       per merge_strategy), resolve, instantiate
 
 This module is deliberately thin. All logic lives in the phase-specific
 modules. GenericConfigBuilder exists for backward compatibility and as
@@ -23,15 +24,14 @@ For most use cases, prefer the convenience functions:
 
 import argparse
 from dataclasses import is_dataclass
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, Literal, Optional, Tuple, Type, overload
 
 from .argument_registry import ArgumentRegistry
+from .config_merging import BaseConfigInput
 from .config_resolver import ConfigResolver
 from .exceptions import ConfigBuilderError
 from .field_analyzer import FieldAnalyzer
-
-# Type alias for base_configs parameter
-BaseConfigInput = Union[str, Dict[str, Any], List[Union[str, Dict[str, Any]]]]
+from .provenance import Provenance
 
 
 class GenericConfigBuilder:
@@ -79,6 +79,12 @@ class GenericConfigBuilder:
         self.field_analyzer = FieldAnalyzer(config_class)
         self._config_fields = self.field_analyzer.analyze_config_fields()
 
+        # Reject cli_nested cycles before anything recurses into nested classes
+        self.field_analyzer.validate_nested_cycles(self._config_fields)
+
+        # Full-path list-merge rule map (cli_list_merge), validated once here
+        self.list_merge_rules = self.field_analyzer.build_list_merge_rules()
+
         # Create argument registry
         self.argument_registry = ArgumentRegistry(
             self.field_analyzer, self._config_fields
@@ -86,7 +92,10 @@ class GenericConfigBuilder:
 
         # Create config resolver
         self.config_resolver = ConfigResolver(
-            config_class, self._config_fields, self.field_analyzer
+            config_class,
+            self._config_fields,
+            self.field_analyzer,
+            self.list_merge_rules,
         )
 
         # Validate nested dataclass field name collisions
@@ -119,11 +128,44 @@ class GenericConfigBuilder:
         self._base_config_name = base_config_name.replace("-", "_")
         self.argument_registry.add_arguments(parser, base_config_name, base_config_help)
 
+    @overload
+    def build_config(
+        self,
+        args: argparse.Namespace,
+        base_config_name: Optional[str] = ...,
+        base_configs: Optional[BaseConfigInput] = ...,
+        merge_strategy: str = ...,
+        *,
+        return_provenance: Literal[True],
+    ) -> Tuple[Any, Provenance]: ...
+
+    @overload
+    def build_config(
+        self,
+        args: argparse.Namespace,
+        base_config_name: Optional[str] = ...,
+        base_configs: Optional[BaseConfigInput] = ...,
+        merge_strategy: str = ...,
+        return_provenance: Literal[False] = ...,
+    ) -> Any: ...
+
+    @overload
+    def build_config(
+        self,
+        args: argparse.Namespace,
+        base_config_name: Optional[str] = ...,
+        base_configs: Optional[BaseConfigInput] = ...,
+        merge_strategy: str = ...,
+        return_provenance: bool = ...,
+    ) -> Any: ...
+
     def build_config(
         self,
         args: argparse.Namespace,
         base_config_name: Optional[str] = None,
         base_configs: Optional[BaseConfigInput] = None,
+        merge_strategy: str = "shallow",
+        return_provenance: bool = False,
     ) -> Any:
         """
         Build dataclass instance from parsed CLI arguments (delegates to ConfigResolver).
@@ -142,11 +184,17 @@ class GenericConfigBuilder:
                          - str: Path to a single config file
                          - dict: A single configuration dictionary
                          - List[Union[str, dict]]: Multiple configs (files and/or dicts) applied in order
+            merge_strategy: How dicts from different sources are merged:
+                           "shallow" (default, one level) or "deep" (recursive)
+            return_provenance: If True (requires merge_strategy="deep"), return
+                              ``(instance, Provenance)`` instead of the instance
 
         Returns:
-            Instance of the configured dataclass type
+            Instance of the configured dataclass type, or ``(instance,
+            Provenance)`` when return_provenance=True
 
         Raises:
+            ConfigBuilderError: If merge_strategy is not 'shallow' or 'deep'
             ConfigurationError: If configuration is invalid or files cannot be loaded
 
         Example:
@@ -168,7 +216,9 @@ class GenericConfigBuilder:
         """
         if base_config_name is None:
             base_config_name = self._base_config_name
-        return self.config_resolver.build_config(args, base_config_name, base_configs)
+        return self.config_resolver.build_config(
+            args, base_config_name, base_configs, merge_strategy, return_provenance
+        )
 
 
 # Re-export convenience functions for backward compatibility

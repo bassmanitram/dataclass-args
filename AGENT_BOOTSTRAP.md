@@ -2,7 +2,7 @@
 
 **Purpose**: Zero-boilerplate CLI generation from Python dataclasses with advanced type support
 **Type**: Library
-**Language**: Python 3.8+
+**Language**: Python 3.11+ (non-EOL versions only; tested on 3.11–3.14; no runtime dependencies)
 **Repository**: https://github.com/bassmanitram/dataclass-args
 
 ---
@@ -22,6 +22,9 @@
 - Think of this as **dataclass-to-CLI compiler** - your dataclass definition IS the CLI specification
 - Field metadata (`cli_short`, `cli_choices`, `cli_nested`, etc.) controls CLI behavior - these are **declarative annotations**
 - Configuration merging follows **precedence layers**: base_configs → --config file → CLI args (later wins)
+- **How layers combine** is per call: `merge_strategy="shallow"` (default) merges dicts **one level** at every boundary; `"deep"` merges recursively. Lists replace, `None` clears, in both
+- **Layered mode** (`merge_strategy="deep"`) unlocks named `ConfigLayer`s, per-field list rules (`cli_list_merge` + `list_merge="rules"` layers append instead of replace) and provenance (`return_provenance=True` → which layer set each leaf)
+- **Every layer is normalised on entry** (`LayerNormalizer`): private copy, hyphen→underscore field names, dict-field file refs loaded, `cli_nested` instances → field dicts. After that, merging only ever sees plain dicts
 - Type system drives parsing - `List[str]` becomes multi-value arg, `bool` becomes flag, `Optional[T]` becomes optional
 - Positional args are **greedy** - they consume remaining arguments, which is why only ONE list positional allowed
 - **Nested dataclasses flatten to CLI** - `cli_nested()` expands nested fields with configurable prefixes
@@ -32,27 +35,40 @@
 
 ```
 dataclass_args/
-├── builder.py              # GenericConfigBuilder - core CLI generation and orchestration
-├── annotations.py          # Field metadata: cli_short(), cli_append(), cli_nested(), etc.
-├── config_applicator.py   # ConfigApplicator - config merging and property overrides
-├── nested_processor.py    # NestedFieldProcessor - nested dataclass flattening/reconstruction
-├── type_inspector.py      # TypeInspector - type analysis utilities
-├── file_loading.py        # @file.txt syntax support for string fields
-├── utils.py               # load_structured_file() - YAML/JSON/TOML loading
-├── exceptions.py          # ConfigBuilderError and subclasses
-└── tests/                 # Comprehensive test suite (424 tests, 92% coverage)
+├── convenience.py          # Public entry points: build_config, build_config_from_cli, build_config_from_dict
+├── builder.py              # GenericConfigBuilder - thin orchestrator (analyser + registry + resolver)
+├── field_analyzer.py       # Field inspection, validation, collisions, cycle guard, list-rule map
+├── argument_registry.py    # argparse registration (field → add_argument), help text, override names
+├── config_resolver.py      # The 9-stage pipeline (see State & Data Flow)
+├── config_merging.py       # ConfigLayer, base_configs normalisation (labels), layer stacking
+├── merge_strategy.py       # MERGE_SHALLOW/DEEP, MergeContext (per-call), combine_dicts, merge_with_rules
+├── layer_normalization.py  # LayerNormalizer - per-layer intake (keys, file refs, nested instances)
+├── config_applicator.py    # merge_layer, --config file, property overrides (set_nested_property)
+├── cli_overrides.py        # Stage 4: real CLI values + top-level property overrides
+├── nested_processor.py     # Recursive flattening + reconstruction of cli_nested at any depth
+├── value_resolution.py     # Stage 5 @file resolution, stage 7 append ranges, stage 8 cli_resolve
+├── provenance.py           # Provenance recorder + query API (entries/source/paths/changes/explain)
+├── annotations.py          # cli_*() annotations and their accessors
+├── type_inspector.py       # Type analysis utilities
+├── file_loading.py         # @file.txt syntax support for string fields
+├── utils.py                # load_structured_file, deep_merge, copy_containers, fresh_field_default
+├── instantiate.py          # instantiate() - object construction from config
+└── exceptions.py           # ConfigBuilderError (programming errors) / ConfigurationError (config errors)
+tests/                      # 1210 tests, ~98% coverage, Python 3.11–3.14
 ```
 
 **Navigation Guide**:
 
 | When you need to... | Start here | Why |
 |---------------------|------------|-----|
-| Add new annotation | `annotations.py` → create `cli_*()` function | All annotations defined here |
-| Modify argument generation | `builder.py` → `_add_field_argument()` | Where field → argparse arg translation happens |
-| Change merge behavior | `builder.py` → `build_config()` → merge logic | Configuration hierarchy handled here |
-| Fix type handling | `builder.py` → `_get_field_type_info()` | Type introspection and parsing |
+| Add new annotation | `annotations.py` → `cli_*()` + accessor; validate in `field_analyzer.py` | All annotations defined here |
+| Modify argument generation | `argument_registry.py` | Field → argparse translation, help text |
+| Change merge behavior | `merge_strategy.py` (`combine_dicts`, `merge_with_rules`) and its 4 call sites | Every place two sources meet uses this |
+| Change what a layer looks like on entry | `layer_normalization.py` | Keys, file refs, nested instances |
+| Fix type handling | `field_analyzer.py` / `type_inspector.py` | Type introspection |
 | Add file format support | `utils.py` → `load_structured_file()` | Format dispatch logic |
-| Handle nested dataclasses | `builder.py` → `_flatten_nested_fields()` | Nested field flattening logic |
+| Handle nested dataclasses | `nested_processor.py` | Recursive flatten/reconstruct, keyed by `path` tuples |
+| Provenance / layer names | `provenance.py`, hooks at stages 2/3/4/6 | Recorder rides on `MergeContext.recorder` |
 
 **Entry points**:
 - Main execution: `build_config(MyDataclass, ['arg1', 'arg2'])` - Returns dataclass instance
@@ -68,12 +84,12 @@ These rules MUST be maintained:
 1. **One greedy positional maximum**: At most one positional with `nargs` in `['*', '+']`, must be last
    - **Why**: argparse limitation - multiple greedy positionals create ambiguous CLI
    - **Breaks if violated**: ArgumentParser raises error at construction time
-   - **Enforced by**: `_validate_positional_arguments()` called during builder init
+   - **Enforced by**: `FieldAnalyzer.validate_positional_arguments()` during builder init
 
-2. **Append fields must have default_factory=list**: `cli_append()` requires list type with factory
-   - **Why**: argparse `action='append'` appends to existing list, needs empty list to start
-   - **Breaks if violated**: First append creates new list, subsequent appends fail
-   - **Enforced by**: Documentation, examples, tests demonstrate pattern (not runtime enforced)
+2. **"Nothing typed" must be distinguishable from a CLI value**: argparse defaults never carry dataclass defaults
+   - **Why**: stages treat a non-`None` Namespace value as "given on the CLI" and let it override layers
+   - **How**: booleans, `append` actions and `*` positionals use `default=SUPPRESS`; `?` positionals use `None` (SUPPRESS is a string and older argparse type-converts string defaults). Dataclass defaults apply at instantiation
+   - **Breaks if violated**: layer values for that field are silently ignored (defect AP1 in 1.9.x)
 
 3. **nargs and min_args/max_args are mutually exclusive**: Can't specify both for `cli_append()`
    - **Why**: They solve same problem differently - nargs is exact count, min/max is range
@@ -83,7 +99,14 @@ These rules MUST be maintained:
 4. **Nested field collision detection**: No duplicate CLI names from flattened nested fields
    - **Why**: Ambiguous which field gets the value (e.g., `app.name` vs `db.name` both become `--name`)
    - **Breaks if violated**: `ConfigBuilderError` with collision details
-   - **Enforced by**: `_check_cli_name_collisions()` in builder init
+   - **Enforced by**: `NestedFieldProcessor._check_collision()` during flattening (all depths), plus short-option and override-name collision checks in `FieldAnalyzer`
+
+5. **Caller data is never mutated or aliased**: every layer is copied at intake (`copy_containers`: dicts/lists at every depth; other objects by reference)
+   - **Breaks if violated**: property overrides/appends write into the caller's dicts; the instance holds caller objects
+
+6. **`deep_merge` stays pure**: no field knowledge, no I/O, never mutates inputs, never recurses into non-dicts. Field-aware behaviour (list rules, instance conversion) lives in `merge_with_rules` / `LayerNormalizer`
+
+7. **Cognitive complexity ≤ 10 per function**: enforced in CI by `flake8-cognitive-complexity`
 
 ---
 
@@ -126,6 +149,18 @@ Things that surprise people:
    - **Pattern**: For non-list fields, library forces `is_dict=True`; for list fields, keeps list behavior. Resolver runs after assembly
    - **Gotcha**: Property overrides work (modify dict before resolution) but fail on pre-built objects
    - **Override**: Use `prefix="custom"` or `prefix=""` (flat) to control
+
+8. **Shallow merge is one level, everywhere** (v1.10.0):
+   - **Watch out for**: `{'db': {'opts': {'x':1}}}` then `{'db': {'opts': {'y':2}}}` → `opts == {'y':2}` (nested dict replaced). Use `merge_strategy="deep"` for recursive merging
+   - **History**: before 1.10, `base_configs`/`--config` replaced dicts wholesale while `--field file.json` merged one level; it is now consistent
+
+9. **Property overrides edit the effective value** (v1.10.0): `--mc k:v` applies to the merged value, else to a fresh copy of the dataclass default; after an explicit `None` it starts from `{}`. A *full* value (`--mc file.json`, a dict layer) still replaces the default rather than merging into it
+
+10. **Required positionals are CLI-only**: `nargs` `None`/`'+'`/int must be typed; layers cannot satisfy them. Optional positionals (`?`/`*`) and everything else can come from any layer. `build_config_from_dict` has no CLI, so all positionals come from the dict
+
+11. **Provenance records raw values** (v1.10.0): after file loading, before `@file`/`cli_resolve`. Only paths a source actually supplied are recorded; `source()` returns `"default"` only for unset dataclass field leaves
+
+12. **List rules never fire for CLI values or the `--config` file**: only stage-2 layers with `list_merge="rules"` (and the `build_config_from_dict` config with `config_list_merge="rules"`)
 
 ---
 
@@ -184,24 +219,20 @@ Things that surprise people:
 - **Runtime state**: GenericConfigBuilder holds field analysis, ArgumentParser instance, flattened field map
 - **No state here**: Annotation functions are pure (just return field metadata)
 
-**Data flow**:
+**Data flow** (`ConfigResolver.build_config`; a `MergeContext` carrying strategy, list rules and the optional provenance recorder is created per call and passed to each stage):
 ```
-Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
-                                                              ↓
-                                                    Flatten Nested Fields (v1.4.0)
-                                                              ↓
-                                                    ArgumentParser.add_argument()
-                                                              ↓
-        Command-line args → ArgumentParser.parse_args() → Namespace
-                                                              ↓
-                    base_configs → Merge → --config file → Merge → CLI args → Merge
-                                                              ↓
-                                                    Reconstruct Nested Structure
-                                                              ↓
-                                                    Resolve Fields (v1.5.0)
-                                                              ↓
-                                                    Dataclass(**merged_dict)
+validate merge_strategy / rules / provenance options           (before any I/O)
+1. normalise layers: base_configs → (label, dict, list_merge); LayerNormalizer on each
+2. apply base_configs      one-level or deep merge; merge_with_rules for rules layers   [provenance]
+3. apply --config file     normalised, then merged (never rules)                         [provenance]
+4. apply CLI overrides     real CLI values + top-level property overrides (always replace) [provenance]
+5. resolve raw values      @file references in layer values
+6. reconstruct nested      cli_nested at any depth, CLI flags + nested overrides           [provenance]
+7. validate append ranges  min_args/max_args
+8. resolve fields          cli_resolve (top level only)
+9. instantiate             config_class(**config)
 ```
+`build_config_from_dict` in deep mode appends the whole `config` dict as the last layer (`name="config"`); in shallow mode it injects regular values into an unparsed Namespace (never `parse_args`, so it never exits).
 
 **Critical paths**:
 - Type hint extraction must happen before argument addition - argparse needs type info
@@ -212,9 +243,8 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 ## Integration Points
 
 **This project depends on** (upstream):
-- **typing-extensions**: Backport of typing features, tightly coupled (enables Python 3.8 support)
+- **No runtime dependencies** (Python 3.11+ stdlib: `tomllib`, `typing`, `types.UnionType`)
 - **PyYAML** (optional): YAML loading, loosely coupled (via utils.py)
-- **tomli** (optional, Python <3.11): TOML loading, loosely coupled
 
 **Projects that depend on this** (downstream):
 - **strands-agent-factory**: Uses dataclass-args for CLI scripts (chatbot, a2a-server)
@@ -229,7 +259,7 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 
 ## Configuration Philosophy
 
-**What's configurable**: Field behavior via annotations, merge strategy via base_configs, precedence via order, nested structure via cli_nested prefix modes
+**What's configurable**: Field behavior via annotations; dict merge depth via `merge_strategy`; list behaviour per field via `cli_list_merge` in rules layers; precedence via layer order; layer names via `ConfigLayer`; nested structure via cli_nested prefix modes
 
 **What's hardcoded**:
 - ArgumentParser as underlying engine
@@ -247,7 +277,10 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 - **Annotation behavior**: Each annotation (cli_short, cli_append, cli_nested, etc.) has dedicated test file
 - **Type handling**: Lists, Dicts, Optional, Path, nested types
 - **Merge behavior**: base_configs precedence, file loading, override order
-- **Nested dataclasses**: Prefix modes, collision detection, config file merging (v1.4.0)
+- **Nested dataclasses**: Prefix modes, collision detection, config file merging, any depth (`test_nested_depth.py`)
+- **Defect regressions**: one test per defect ID (`test_defect_fixes.py`, IDs from the 1.10 defect register)
+- **Merge/layers/provenance**: `test_deep_merge.py`, `test_list_merge_rules.py`, `test_layered_mode.py` (incl. shallow-vs-layered equivalence per field kind), `test_provenance.py`
+- **Python matrix**: the whole suite runs on 3.11–3.14 in CI
 - **Edge cases**: Empty configs, missing fields, type mismatches
 
 **What we don't test**:
@@ -307,33 +340,17 @@ Dataclass Definition → GenericConfigBuilder.__init__() → Field Analysis
 ## Modification Patterns
 
 **To add new annotation** (e.g., `cli_required()`):
-1. Create function in `annotations.py` → `cli_required(**kwargs)` returning `field(metadata={...})`
-2. Add helper `is_cli_required(field_info)` and `get_cli_required_value(field_info)`
-3. Update `builder.py` → `_add_field_argument()` to check metadata and apply to argparse
-4. Add test file `tests/test_cli_required.py` with comprehensive cases
-5. Add example in `examples/cli_required_example.py`
+1. `annotations.py`: `cli_required(**kwargs)` returning `field(metadata={...})` + accessor
+2. `field_analyzer.py`: validate combinations at builder construction (fail fast with `ConfigBuilderError`)
+3. `argument_registry.py`: apply to argparse if it affects the CLI (keep argparse defaults "nothing typed"-safe; see invariant 2)
+4. Tests in a dedicated `tests/test_cli_required.py`; check `--help` is unchanged for existing examples
+5. Example in `examples/` and a line in `scripts/run_examples.sh`
 
-**To add new type support** (e.g., Decimal):
-1. Update `builder.py` → `_get_field_type_info()` to detect Decimal type
-2. Add conversion logic (argparse `type=Decimal` or custom converter)
-3. Add tests in `tests/test_builder_advanced.py` or new file
-4. Document in README.md type support section
+**To add new type support** (e.g., Decimal): `type_inspector.py` / `field_analyzer.py` detection → `argument_registry.py` conversion → tests → README type table.
 
-**To fix precedence issue** (e.g., CLI args not overriding base_configs):
-1. Check `builder.py` → `build_config()` merge logic - order matters
-2. Verify argparse isn't using `set_defaults()` (should use `SUPPRESS` for booleans)
-3. Add test demonstrating correct precedence
-4. Fix merge order or default handling
+**To change how sources combine**: change `merge_strategy.py` only; all four combination sites (stages 2, 3, 4 dict override, 6 nested dict) call `combine_dicts`. Keep shallow behaviour pinned (tests + `local`-style oracle outputs) and keep `deep_merge` pure.
 
-**To add nested dataclass support** (v1.4.0 - completed):
-1. Add `cli_nested()` annotation in `annotations.py` with prefix parameter
-2. Implement `_flatten_nested_fields()` in `builder.py` to recursively extract fields
-3. Add collision detection in `_check_cli_name_collisions()`
-4. Handle nested reconstruction in `build_config()` merge logic
-5. Add comprehensive tests in `tests/test_cli_nested.py`
-6. Add examples demonstrating all prefix modes
-
----
+**To add a provenance hook**: feed the recorder the *incoming* leaves of what the source supplied (never a before/after diff of the merged config, which would credit seeded defaults to the wrong layer).
 
 ## When to Update This Document
 
@@ -344,6 +361,7 @@ Update this bootstrap when:
 - [x] Configuration philosophy changes (e.g., support config hierarchy like profile-config)
 - [x] **Nested dataclass support added** (v1.4.0 - architectural change)
 - [x] **Post-load resolution added** (v1.5.0 - new pipeline stage, new annotation pattern)
+- [x] **Merge strategies, layers, list rules, provenance, nesting at any depth, Python ≥ 3.11** (v1.10.0)
 
 Don't update for:
 - ❌ Individual annotation additions (follow existing pattern)
@@ -354,5 +372,5 @@ Don't update for:
 
 ---
 
-**Last Updated**: 2026-06-23
-**Last Architectural Change**: v1.5.0 - Added cli_resolve() for post-load field resolution (new pipeline stage 3.8)
+**Last Updated**: 2026-11-24
+**Last Architectural Change**: v1.10.0 - layer normalisation stage, per-call MergeContext (merge strategy, list rules, provenance recorder), recursive nesting, Python ≥ 3.11

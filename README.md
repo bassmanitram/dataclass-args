@@ -6,7 +6,7 @@ Generate command-line interfaces from Python dataclasses.
 [![Lint](https://github.com/bassmanitram/dataclass-args/actions/workflows/lint.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/lint.yml)
 [![Code Quality](https://github.com/bassmanitram/dataclass-args/actions/workflows/quality.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/quality.yml)
 [![Examples](https://github.com/bassmanitram/dataclass-args/actions/workflows/examples.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/examples.yml)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://img.shields.io/pypi/v/dataclass-args.svg)](https://pypi.org/project/dataclass-args/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -22,23 +22,25 @@ Generate command-line interfaces from Python dataclasses.
 - **[Repeatable Options](#repeatable-options)** - Allow options to be specified multiple times with `cli_append()`
 - **[File Loading](#file-loadable-parameters)** - Load parameters from files using `@filename` syntax
 - **[Config Merging](#configuration-merging)** - Combine configuration sources with hierarchical overrides
+- **[Deep Merge](#deep-merge)** - Opt-in recursive dict merging with `merge_strategy="deep"`
+- **[Layered Configuration](#layered-configuration)** - Named layers, per-field list-merge rules (`cli_list_merge()`) and provenance (which layer set what)
 - **[Property Overrides](#dict-field-property-overrides)** - Set individual dict properties with `--mc key:value` and list indexing
 - **[Flexible Types](#type-support)** - Support for `List`, `Dict`, `Optional`, and custom types
 - **[Field Resolution](#field-resolution)** - Transform config dicts into typed objects with `cli_resolve()`
 - **[Object Instantiation](#object-instantiation)** - Construct objects from config using `instantiate()`
 - **[Rich Annotations](#combining-annotations)** - Custom help text, exclusions, and combinations
 - **[Programmatic Usage](#programmatic-usage)** - Build configs from dicts without CLI via `build_config_from_dict()`
-- **[Minimal Dependencies](#installation)** - Lightweight with optional format support
+- **[Zero Dependencies](#installation)** - No runtime dependencies; optional YAML support
 ## Quick Start
 
 ### Installation
 
 ```bash
-pip install dataclass-args
+pip install dataclass-args              # requires Python 3.11+
 
 # With optional format support
-pip install "dataclass-args[yaml,toml]"  # YAML and TOML config files
-pip install "dataclass-args[all]"        # All optional dependencies
+pip install "dataclass-args[yaml]"      # YAML config files (JSON and TOML are built in)
+pip install "dataclass-args[all]"       # All optional dependencies
 ```
 
 ### Basic Usage
@@ -367,6 +369,12 @@ class Invalid:
 
 **Why?** Positional lists are greedy and consume all remaining values. The parser can't determine where one positional list ends and another begins without `--` flags.
 
+#### Positional Values from Config Sources
+
+- **Required positionals** (`nargs` of `None`, `'+'` or an integer) are part of the command-line contract. They must be given on the command line, and a value in `base_configs` or `--config` can't satisfy them.
+- **Optional positionals** (`nargs='?'` or `'*'`) behave like any other field. A config source can set them, and the command line overrides it.
+- In `build_config_from_dict` there is no command line, so every positional, required or not, comes from the config dict.
+
 ### Combining Annotations
 
 Use `combine_annotations()` to merge multiple features:
@@ -538,6 +546,8 @@ $ python app.py --name "MyApp" --system-prompt "@~/prompts/assistant.txt"
 ### Nested Dataclasses
 
 Organize complex configurations into nested dataclasses with automatic CLI flattening. Use `cli_nested()` to create hierarchical configs that are exposed as flat CLI arguments with customizable prefixes.
+
+Nesting works at any depth. A `cli_nested` dataclass inside another one is flattened recursively, combining the prefixes from each level (`--mid-inner-v`), and is rebuilt as real dataclass instances.
 
 ```python
 from dataclass_args import cli_nested
@@ -877,7 +887,7 @@ memory: 1g
 
 1. **Parsing**: Field is treated as a dict field (supports file path loading + property overrides)
 2. **Assembly**: All config sources merge normally (base_configs → config file → CLI)
-3. **Resolution** (Stage 3.8): Resolver function called on non-None values
+3. **Resolution** (pipeline stage 8): Resolver function called on non-None values
 4. **Result**: Dict is transformed into the typed object for the dataclass
 
 #### List Fields
@@ -933,8 +943,11 @@ If the resolver itself raises `ConfigurationError`, it's re-raised without wrapp
 **See also:**
 - [`examples/cli_resolve_example.py`](examples/cli_resolve_example.py) - Complete working example
 
+### Config Files, Dict Files and Property Overrides Together
 
+A `--config` file, a dict-field file and individual property overrides compose in precedence order:
 
+```yaml
 # config.yaml
 name: "DefaultApp"
 count: 100
@@ -945,12 +958,6 @@ database:
 ```
 
 ```python
-@dataclass
-class DatabaseConfig:
-    host: str = "localhost"
-    port: int = 5432
-    timeout: float = 30.0
-
 @dataclass
 class AppConfig:
     name: str
@@ -963,6 +970,9 @@ config = build_config_from_cli(AppConfig, [
     '--database', 'db.json',    # Load additional database config
     '--d', 'timeout:60'         # Override database.timeout property
 ])
+# db.json = {"pool": 5}  →
+# AppConfig(name='OverriddenApp', count=100,
+#           database={'host': 'localhost', 'port': 5432, 'timeout': 60, 'pool': 5})
 ```
 
 ### Object Instantiation
@@ -1148,7 +1158,7 @@ config = build_config(
 |------|----------|---------|
 | **Scalar** (str, int, float) | Replace | Later value replaces earlier value |
 | **List** | Replace | Later list replaces earlier list (not appended) |
-| **Dict** | Shallow merge | Keys are merged; later sources override earlier keys |
+| **Dict** | One-level merge | Top-level keys are merged; later sources override earlier keys. Nested dicts inside a key are replaced, not merged |
 
 **Dict merge example:**
 ```python
@@ -1162,6 +1172,130 @@ config = build_config(
 {'name': 'app', 'db': {'host': 'localhost', 'port': 3306, 'timeout': 30}}
 #  ^unchanged    ^merged: host kept, port updated, timeout added
 ```
+
+**Nested dict replaced example:**
+```python
+# base_configs[0]: {'db': {'host': 'h', 'opts': {'x': 1}}}
+# base_configs[1]: {'db': {'opts': {'y': 2}}}
+# Result:          {'db': {'host': 'h', 'opts': {'y': 2}}}   # host kept, opts replaced
+```
+
+#### Deep Merge
+
+By default, dicts from different sources are merged **one level** deep: a nested dict inside a key is replaced, not merged. Pass `merge_strategy="deep"` to merge dicts recursively at every depth, at every point where two sources meet (`base_configs`, `--config`, `--field file.json`, and nested dataclass values):
+
+```python
+from dataclass_args import build_config, MERGE_DEEP
+
+layers = [
+    {'db': {'host': 'localhost', 'pool': {'min': 1, 'max': 10}}},
+    {'db': {'pool': {'max': 50}}},
+]
+
+build_config(AppConfig, [], base_configs=layers).db
+# {'host': 'localhost', 'pool': {'max': 50}}             # default: pool replaced
+
+build_config(AppConfig, [], base_configs=layers, merge_strategy=MERGE_DEEP).db
+# {'host': 'localhost', 'pool': {'min': 1, 'max': 50}}   # deep: pool merged
+```
+
+Both modes follow the same rules:
+- Lists **replace** (but see [list-merge rules](#layered-configuration)).
+- An explicit `None` **clears** a value.
+- Precedence is unchanged.
+- The objects you pass in are never mutated.
+
+The same semantics are available as a utility function: `deep_merge(base, override)` returns a new dict and leaves both inputs untouched.
+
+`merge_strategy` is accepted by `build_config`, `build_config_from_cli`, `build_config_from_dict` and `GenericConfigBuilder.build_config`. See [`examples/deep_merge_example.py`](examples/deep_merge_example.py).
+
+#### Layered Configuration
+
+Tools that combine platform defaults, a user's own config and mandatory platform overrides need three things beyond deep merge. This is similar to systemd drop-in directories, or to Docker Compose's per-field merge rules:
+- **Named layers**, so you can tell where a value came from.
+- A way for an override layer to **add to a list** instead of replacing it.
+- A record of **which layer set what**.
+
+All three need `merge_strategy="deep"`.
+
+**Named layers.** `ConfigLayer` is accepted anywhere `base_configs` accepts a path or a dict:
+
+```python
+from dataclass_args import ConfigLayer
+
+base_configs = [
+    ConfigLayer("defaults.d/10-platform.yaml", name="platform"),
+    ConfigLayer(agent_dict, name="agent.yaml"),
+    ConfigLayer(overrides_dict, name="overrides", list_merge="rules"),
+]
+```
+
+**List-merge rules.** In a layer with `list_merge="rules"`, the list fields and dict paths annotated with `cli_list_merge()` **append** instead of replacing. Lists you haven't annotated still replace, and CLI arguments always replace.
+
+```python
+from dataclass_args import cli_list_merge, combine_annotations
+
+@dataclass
+class AgentConfig:
+    plugins: List[str] = combine_annotations(
+        cli_list_merge("append_unique"), default_factory=list)
+    skills: Dict[str, Any] = combine_annotations(
+        cli_list_merge("append_unique", paths=["roots", "policy.denied"]),
+        default_factory=dict)
+
+layers = [
+    {"plugins": ["dev"],
+     "skills": {"roots": ["./sk"], "policy": {"denied": ["old"], "execution": "allow"}}},
+    ConfigLayer({"plugins": ["guard"],
+                 "skills": {"policy": {"denied": ["exfil"], "execution": "deny"}}},
+                list_merge="rules"),
+]
+cfg = build_config(AgentConfig, [], base_configs=layers, merge_strategy="deep")
+cfg.plugins  # ['dev', 'guard']
+cfg.skills   # {'roots': ['./sk'], 'policy': {'denied': ['old', 'exfil'], 'execution': 'deny'}}
+```
+
+The two modes:
+- `"append"`: concatenates the lists.
+- `"append_unique"`: adds only the elements not already present, compared with `==` (so dicts work too). Existing order is kept.
+
+Rules apply only where **both** sides are lists. Otherwise the later value wins as usual, so `None` still clears. Annotate list or dict fields inside nested dataclasses to apply rules at any depth. With `build_config_from_dict(..., merge_strategy="deep", config_list_merge="rules")`, the `config` dict itself is a rules layer.
+
+**Provenance.** Pass `return_provenance=True` to get `(instance, Provenance)`:
+
+```python
+cfg, prov = build_config_from_dict(
+    AgentConfig, {}, base_configs=[
+        ConfigLayer({"skills": {"policy": {"execution": "deny"}}}, name="platform"),
+        ConfigLayer({"skills": {"policy": {"execution": "allow"}}}, name="agent"),
+    ],
+    merge_strategy="deep", return_provenance=True)
+
+prov.source("skills.policy.execution")   # 'agent'
+prov.changes()   # [ProvenanceChange(path='skills.policy.execution', from_layer='platform',
+                 #   from_value='deny', to_layer='agent', to_value='allow', action='replaced')]
+print(prov.explain())                    # path | source | value  table
+```
+
+| Method | Returns |
+|---|---|
+| `entries(path)` | Every layer that touched `path`, in order (`set`, `replaced`, `confirmed`, `cleared`, `appended`, `removed`) |
+| `source(path)` | The layer that set the final value; `"default"` for an unset dataclass field; `None` for unknown paths |
+| `paths()` | All layer-set leaf paths (dotted, sorted) |
+| `changes()` | Every place where a later layer **discarded** an earlier value. Appends and identical re-sets aren't changes. |
+| `explain()` | A plain-text table of every path, its source and its value |
+
+Some details:
+- Paths are dotted, and lists are leaves.
+- Provenance records **raw** layer values: after files are loaded, but before `@file` and `cli_resolve` resolution. The instance holds the resolved values.
+- The layer names are:
+  - the `ConfigLayer` name;
+  - otherwise the file path, or `base_configs[i]` for a dict;
+  - `config_file:<path>` for `--config`;
+  - `config` for the `build_config_from_dict` dict;
+  - `cli` for the command line.
+
+See [`examples/layered_config_example.py`](examples/layered_config_example.py).
 
 #### Real-World Example
 
@@ -1375,7 +1509,7 @@ config = build_config_from_dict(
 
 ### Main Functions
 
-#### `build_config(config_class, args=None)`
+#### `build_config(config_class, args=None, base_configs=None, description=None, merge_strategy="shallow", return_provenance=False)`
 
 Generate CLI from dataclass and parse arguments.
 
@@ -1391,8 +1525,13 @@ Generate CLI with additional options.
 config = build_config_from_cli(
     MyDataclass,
     args=['--name', 'test'],
+    base_configs=['defaults.yaml', {'debug': True}],
+    base_config_name='config',      # name of the --config option
+    merge_strategy='deep',          # optional: recursive dict merge
+)
+```
 
-#### `build_config_from_dict(config_class, config, base_configs=None)`
+#### `build_config_from_dict(config_class, config, base_configs=None, config_list_merge="replace", merge_strategy="shallow", return_provenance=False)`
 
 Build a dataclass instance from a dictionary with full resolution pipeline. Recommended for Lambda handlers, SDKs, and test harnesses.
 
@@ -1608,7 +1747,7 @@ database:
   port: 5432
 ```
 
-### TOML (requires `pip install "dataclass-args[toml]"`)
+### TOML (built in, via the standard library's `tomllib`)
 ```toml
 name = "MyApp"
 count = 42
@@ -1787,7 +1926,10 @@ from dataclass_args import (
     cli_file_loadable,           # @file loading
     cli_override_name,           # Custom dict override abbreviation
     cli_resolve,                 # Post-load resolution
+    cli_list_merge,              # Append-in-rules-layers list fields
     combine_annotations,         # Combine features
+    ConfigLayer,                 # Named config layer (replace | rules)
+    deep_merge,                  # Recursive dict merge utility
     InstantiationError,          # Instantiation failures
 )
 

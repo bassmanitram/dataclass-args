@@ -471,10 +471,11 @@ class TestFileLoadingErrorPaths:
 
         # Patch os.access and Path methods to pass pre-read checks,
         # then patch open to raise IOError during actual read
-        with patch("pathlib.Path.exists", return_value=True), patch(
-            "pathlib.Path.is_file", return_value=True
-        ), patch("os.access", return_value=True), patch(
-            "builtins.open", side_effect=IOError("disk error")
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.is_file", return_value=True),
+            patch("os.access", return_value=True),
+            patch("builtins.open", side_effect=IOError("disk error")),
         ):
             with pytest.raises(FileLoadingError, match="Error reading file"):
                 load_file_content("/fake/path.txt")

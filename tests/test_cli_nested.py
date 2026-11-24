@@ -30,7 +30,7 @@ from dataclass_args import (
     combine_annotations,
 )
 from dataclass_args.builder import GenericConfigBuilder
-from dataclass_args.exceptions import ConfigBuilderError
+from dataclass_args.exceptions import ConfigBuilderError, ConfigurationError
 
 
 class TestBasicNested:
@@ -836,7 +836,7 @@ class TestNestedProcessorErrorPaths:
         assert result.db.port == 3306
 
     def test_nested_with_non_dict_non_dataclass_in_config(self):
-        """Non-dict non-dataclass value in base_configs starts fresh dict."""
+        """Non-dict non-dataclass value for a nested field raises ConfigurationError (F5)."""
 
         @dataclass
         class DatabaseConfig:
@@ -849,14 +849,14 @@ class TestNestedProcessorErrorPaths:
             db: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
 
         # String value (invalid type for nested field) in base_configs
-        result = build_config(
-            AppConfig,
-            args=["--db-host", "cli-host"],
-            base_configs={"db": "invalid_string_value"},
-        )
-        # String gets discarded, CLI value used
-        assert result.db.host == "cli-host"
-        assert result.db.port == 5432  # default
+        with pytest.raises(ConfigurationError) as exc:
+            build_config(
+                AppConfig,
+                args=["--db-host", "cli-host"],
+                base_configs={"db": "invalid_string_value"},
+            )
+        assert "'db'" in str(exc.value)
+        assert "DatabaseConfig" in str(exc.value)
 
 
 if __name__ == "__main__":

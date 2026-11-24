@@ -4,22 +4,8 @@ Type inspection utilities for analyzing dataclass field types.
 Consolidates type origin/args extraction and type checking logic.
 """
 
-from typing import Any, Optional, Tuple, Type
-
-# Import typing utilities with Python 3.8+ compatibility
-try:
-    from typing import get_args, get_origin  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover
-    from typing_extensions import (  # type: ignore[assignment,no-redef]  # pragma: no cover
-        get_args,
-        get_origin,
-    )
-
-# Python 3.10+ PEP 604 union type support (X | Y syntax)
-try:
-    from types import UnionType as _UnionType  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover
-    _UnionType = None  # type: ignore[assignment,misc]  # pragma: no cover
+from types import UnionType
+from typing import Any, Optional, Tuple, Type, Union, get_args, get_origin
 
 
 class TypeInspector:
@@ -72,17 +58,8 @@ class TypeInspector:
         origin, args = TypeInspector.get_origin_and_args(field_type)
 
         if origin is not None:
-            # Check typing.Union (includes Optional)
-            try:
-                from typing import Union
-
-                if origin is Union:
-                    return type(None) in args
-            except ImportError:
-                pass
-
-            # Check PEP 604 union type (Python 3.10+): X | None
-            if _UnionType is not None and origin is _UnionType:
+            # Check typing.Union (includes Optional) and PEP 604 unions (X | None)
+            if origin is Union or origin is UnionType:
                 return type(None) in args
 
         return False

@@ -98,6 +98,7 @@ from .annotations import (
     cli_file_loadable,
     cli_help,
     cli_include,
+    cli_list_merge,
     cli_nested,
     cli_override_name,
     cli_positional,
@@ -109,6 +110,7 @@ from .annotations import (
     get_cli_append_min_args,
     get_cli_append_nargs,
     get_cli_choices,
+    get_cli_list_merge,
     get_cli_nested_prefix,
     get_cli_override_name,
     get_cli_positional_metavar,
@@ -129,6 +131,7 @@ from .builder import (
     build_config_from_cli,
     build_config_from_dict,
 )
+from .config_merging import MERGE_DEEP, MERGE_SHALLOW, ConfigLayer
 from .exceptions import (
     ConfigBuilderError,
     ConfigurationError,
@@ -137,9 +140,10 @@ from .exceptions import (
 )
 from .file_loading import is_file_loadable_value, load_file_content
 from .instantiate import instantiate
-from .utils import load_structured_file
+from .provenance import MISSING_VALUE, Provenance, ProvenanceChange, ProvenanceEntry
+from .utils import deep_merge, load_structured_file
 
-__version__ = "1.9.1"
+__version__ = "1.10.0"
 
 __all__ = [
     # Main API
@@ -151,6 +155,7 @@ __all__ = [
     "instantiate",
     # Annotations
     "cli_help",
+    "cli_list_merge",
     "cli_short",
     "cli_override_name",
     "cli_choices",
@@ -165,6 +170,7 @@ __all__ = [
     "get_cli_short",
     "get_cli_override_name",
     "get_cli_choices",
+    "get_cli_list_merge",
     "get_cli_nested_prefix",
     "get_cli_positional_nargs",
     "get_cli_positional_metavar",
@@ -185,6 +191,14 @@ __all__ = [
     "is_file_loadable_value",
     # Utilities
     "load_structured_file",
+    "deep_merge",
+    "MERGE_SHALLOW",
+    "MERGE_DEEP",
+    "ConfigLayer",
+    "Provenance",
+    "ProvenanceEntry",
+    "ProvenanceChange",
+    "MISSING_VALUE",
     # Exceptions
     "ConfigBuilderError",
     "ConfigurationError",

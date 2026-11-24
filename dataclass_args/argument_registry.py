@@ -24,13 +24,17 @@ Data Flow:
 """
 
 import argparse
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
-
-# Import typing utilities with Python 3.8+ compatibility
-try:
-    from typing import get_args, get_origin  # type: ignore[attr-defined,no-redef]
-except ImportError:  # pragma: no cover
-    from typing_extensions import get_args, get_origin  # type: ignore[assignment,no-redef]  # noqa: E501  # pragma: no cover
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    get_args,
+    get_origin,
+)
 
 from .annotations import (
     get_cli_append_max_args,
@@ -47,7 +51,25 @@ from .annotations import (
 )
 from .append_action import RangeAppendAction
 from .exceptions import ConfigBuilderError
-from .field_analyzer import FieldAnalyzer
+from .field_analyzer import FieldAnalyzer, compose_override_name
+from .nested_processor import mapping_source
+
+
+class _ChoicesAllowingNothing(List[Any]):
+    """
+    Choices for a ``nargs="*"`` positional that also accept "nothing typed".
+
+    argparse runs its choices check on the default (or the empty list) even
+    when nothing was typed, which would reject the SUPPRESS marker or ``[]``
+    on every Python version. Typed values are still checked normally.
+    """
+
+    def __contains__(self, item: object) -> bool:
+        return (
+            item is argparse.SUPPRESS
+            or (isinstance(item, list) and not item)
+            or super().__contains__(item)
+        )
 
 
 class ArgumentRegistry:
@@ -120,7 +142,7 @@ class ArgumentRegistry:
                 if is_cli_positional(info):
                     raise ConfigBuilderError(
                         f"Positional arguments in nested dataclasses are not supported.\n"
-                        f"Field: {mapping['parent_field']}.{mapping['nested_field']}\n"
+                        f"Field: {mapping_source(mapping)}\n"
                         f"Use regular fields or optional arguments instead."
                     )
             else:
@@ -142,23 +164,30 @@ class ArgumentRegistry:
         """
         for cli_name, mapping in flat_fields.items():
             if mapping.get("parent_field"):
-                # Nested field - add with prefixed CLI name
-                nested_field = mapping["nested_field"]
-                info = mapping["nested_info"]
-                prefix = mapping["prefix"]
-                if not is_cli_positional(info):
-                    parent = mapping["parent_field"]
-                    self.add_argument(
-                        parser, nested_field, info, cli_name, prefix, parent
-                    )
+                self._add_nested_optional_argument(parser, cli_name, mapping)
             else:
-                # Regular field - skip if nested dataclass
-                field_name = mapping["field_name"]
-                info = mapping["field_info"]
-                if not is_cli_positional(info) and not info.get(
-                    "is_nested_dataclass", False
-                ):
-                    self.add_argument(parser, field_name, info)
+                self._add_flat_optional_argument(parser, mapping)
+
+    def _add_nested_optional_argument(
+        self, parser: argparse.ArgumentParser, cli_name: str, mapping: Dict[str, Any]
+    ) -> None:
+        """Add a nested (flattened) field as an optional argument with its prefixed name."""
+        info = mapping["nested_info"]
+        if is_cli_positional(info):
+            return
+        parent = ".".join(mapping["path"][:-1])
+        self.add_argument(
+            parser, mapping["nested_field"], info, cli_name, mapping["prefix"], parent
+        )
+
+    def _add_flat_optional_argument(
+        self, parser: argparse.ArgumentParser, mapping: Dict[str, Any]
+    ) -> None:
+        """Add a regular field as an optional argument (nested dataclasses are skipped)."""
+        info = mapping["field_info"]
+        if is_cli_positional(info) or info.get("is_nested_dataclass", False):
+            return
+        self.add_argument(parser, mapping["field_name"], info)
 
     def add_positional_argument(
         self, parser: argparse.ArgumentParser, field_name: str, info: Dict[str, Any]
@@ -186,7 +215,7 @@ class ArgumentRegistry:
 
         # Build kwargs
         kwargs = self._build_positional_kwargs(
-            help_text, metavar, nargs, choices, arg_type, info
+            help_text, metavar, nargs, choices, arg_type
         )
 
         parser.add_argument(arg_name, **kwargs)
@@ -217,10 +246,14 @@ class ArgumentRegistry:
         nargs: Optional[str],
         choices: Optional[List[Any]],
         arg_type: Callable[[str], Any],
-        info: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         Build kwargs dictionary for positional argument.
+
+        The dataclass default is never given to argparse: a value typed on the
+        CLI must be distinguishable from "nothing typed", so layer values are
+        not overridden by a default. The dataclass applies its own default at
+        instantiation.
 
         Args:
             help_text: Help text for the argument
@@ -228,7 +261,6 @@ class ArgumentRegistry:
             nargs: nargs value (optional)
             choices: Valid choices (optional)
             arg_type: Type converter function
-            info: Field information dictionary
 
         Returns:
             Dictionary of kwargs for add_argument
@@ -242,16 +274,18 @@ class ArgumentRegistry:
             kwargs["nargs"] = nargs
 
         if choices:
-            kwargs["choices"] = choices
+            kwargs["choices"] = (
+                _ChoicesAllowingNothing(choices) if nargs == "*" else choices
+            )
 
         # Type handling: for list-like nargs, type applies to each element
         kwargs["type"] = arg_type
 
-        # Add default if specified and nargs allows it
-        if nargs in ("?", "*"):
-            default = info.get("default")
-            if default is not None:
-                kwargs["default"] = default
+        # "*" with nothing typed must leave the attribute absent. "?" keeps
+        # argparse's None default instead: SUPPRESS would make Python <= 3.11
+        # run the type converter / choices check on the SUPPRESS marker.
+        if nargs == "*":
+            kwargs["default"] = argparse.SUPPRESS
 
         return kwargs
 
@@ -490,7 +524,6 @@ class ArgumentRegistry:
             choices,
             min_args,
             max_args,
-            info,
         )
 
         parser.add_argument(*arg_names, **kwargs)
@@ -533,10 +566,13 @@ class ArgumentRegistry:
         choices: Optional[List[Any]],
         min_args: Optional[int],
         max_args: Optional[int],
-        info: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         Build kwargs dictionary for append argument.
+
+        The dataclass default is never given to argparse (default=SUPPRESS), so
+        nothing typed leaves the attribute absent and layer values are not
+        overridden by it.
 
         Args:
             arg_type: Type converter function
@@ -546,7 +582,6 @@ class ArgumentRegistry:
             choices: Valid choices (optional)
             min_args: Minimum arguments per occurrence (optional)
             max_args: Maximum arguments per occurrence (optional)
-            info: Field information dictionary
 
         Returns:
             Dictionary of kwargs for add_argument
@@ -575,10 +610,7 @@ class ArgumentRegistry:
         if choices:
             kwargs["choices"] = choices
 
-        # Add default
-        default = info.get("default")
-        if default is not None:
-            kwargs["default"] = default
+        kwargs["default"] = argparse.SUPPRESS
 
         return kwargs
 
@@ -685,13 +717,7 @@ class ArgumentRegistry:
         Returns:
             Override argument name (e.g., "--mc" or "--agent-mc")
         """
-        if prefix == "":
-            return info.get("override_name", "")
-        else:
-            base_override = info.get("override_name", "").lstrip("--")
-            return (
-                f"--{prefix}{base_override}" if base_override else f"--{prefix}override"
-            )
+        return compose_override_name(info, prefix)
 
     def add_list_field(
         self,

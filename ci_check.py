@@ -6,6 +6,21 @@ import sys
 from pathlib import Path
 
 
+def _print_outcome(result):
+    """Print the outcome of a finished check command."""
+    if result.returncode == 0:
+        print(f"✅ PASS")
+        if result.stdout:
+            print(result.stdout[:500])
+        return
+
+    print(f"❌ FAIL (exit code: {result.returncode})")
+    if result.stderr:
+        print("STDERR:", result.stderr[:500])
+    if result.stdout:
+        print("STDOUT:", result.stdout[:500])
+
+
 def run_check(name, command, critical=True):
     """Run a check command and report status."""
     print(f"\n{'='*60}")
@@ -15,20 +30,8 @@ def run_check(name, command, critical=True):
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True, timeout=30
         )
-
-        if result.returncode == 0:
-            print(f"✅ PASS")
-            if result.stdout:
-                print(result.stdout[:500])
-        else:
-            print(f"❌ FAIL (exit code: {result.returncode})")
-            if result.stderr:
-                print("STDERR:", result.stderr[:500])
-            if result.stdout:
-                print("STDOUT:", result.stdout[:500])
-            if critical:
-                return False
-        return True
+        _print_outcome(result)
+        return result.returncode == 0 or not critical
     except subprocess.TimeoutExpired:
         print(f"⏱️ TIMEOUT")
         return False
@@ -51,10 +54,6 @@ def main():
             "python -c 'import dataclass_args; print(dataclass_args.__version__)'",
         ),
         (
-            "Import typing_extensions",
-            "python -c 'import typing_extensions; print(\"typing_extensions OK\")'",
-        ),
-        (
             "Check get_origin/get_args",
             "python -c 'from typing import get_origin, get_args; print(\"typing OK\")'",
         ),
@@ -63,7 +62,7 @@ def main():
         ("Run file loading tests", "python -m pytest tests/test_file_loading.py -v"),
         ("Black check", "black --check dataclass_args/ tests/ examples/", False),
         ("isort check", "isort --check-only dataclass_args/ tests/ examples/", False),
-        ("mypy check (may fail on 3.8)", "mypy dataclass_args/", False),
+        ("mypy check", "mypy dataclass_args/", False),
     ]
 
     passed = 0
