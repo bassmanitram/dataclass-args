@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project maintains **98.17%** code coverage with comprehensive testing and branch coverage enabled.
+This project maintains **98.02%** code coverage with comprehensive testing and branch coverage enabled.
 
 ## Current Coverage Statistics (v1.10.0)
 
@@ -11,7 +11,7 @@ This project maintains **98.17%** code coverage with comprehensive testing and b
 | `__init__.py` | 10 | 0 | 0 | 0 | **100.00%** |
 | `annotations.py` | 186 | 0 | 48 | 0 | **100.00%** |
 | `append_action.py` | 6 | 0 | 0 | 0 | **100.00%** |
-| `argument_registry.py` | 199 | 1 | 72 | 2 | **98.89%** |
+| `argument_registry.py` | 202 | 1 | 72 | 2 | **98.91%** |
 | `builder.py` | 42 | 0 | 10 | 3 | **94.23%** |
 | `cli_overrides.py` | 89 | 0 | 30 | 0 | **100.00%** |
 | `config_applicator.py` | 102 | 0 | 44 | 0 | **100.00%** |
@@ -26,15 +26,16 @@ This project maintains **98.17%** code coverage with comprehensive testing and b
 | `layer_normalization.py` | 75 | 0 | 26 | 0 | **100.00%** |
 | `merge_strategy.py` | 50 | 0 | 24 | 0 | **100.00%** |
 | `nested_processor.py` | 185 | 3 | 76 | 2 | **98.08%** |
+| `option_collisions.py` | 88 | 3 | 46 | 4 | **94.78%** |
 | `provenance.py` | 202 | 2 | 64 | 2 | **98.50%** |
 | `type_inspector.py` | 64 | 1 | 30 | 3 | **95.74%** |
 | `utils.py` | 108 | 0 | 40 | 0 | **100.00%** |
 | `value_resolution.py` | 72 | 3 | 34 | 1 | **96.23%** |
-| **TOTAL** | **2110** | **23** | **780** | **28** | **98.17%** |
+| **TOTAL** | **2201** | **26** | **826** | **32** | **98.02%** |
 
 ## Test Suite
 
-- **Total Tests:** 1210
+- **Total Tests:** 1234
 - **Test Execution Time:** ~10s
 - **All Tests Passing:** ✅
 - **Python Version:** 3.11+ (tested on 3.11–3.14)
@@ -42,8 +43,8 @@ This project maintains **98.17%** code coverage with comprehensive testing and b
 ## Coverage Requirements
 
 - **Minimum Required:** 88%
-- **Current Coverage:** 98.17% ✅
-- **Modules at 100%:** 13 of 22
+- **Current Coverage:** 98.02% ✅
+- **Modules at 100%:** 13 of 23
 
 ## Coverage History
 
@@ -55,7 +56,7 @@ This project maintains **98.17%** code coverage with comprehensive testing and b
 | v1.7.0 | 660 | 98.76% | +27 tests (build_config_from_dict) |
 | v1.8.1 | 675 | 97.74% | +15 tests, major refactor |
 | v1.9.0 | 723 | 97.58% | +48 tests (cli_override_name, list overrides) |
-| v1.10.0 | 1210 | 98.17% | +487 tests (defect fixes, deep merge, layers, list rules, provenance, nesting at any depth) |
+| v1.10.0 | 1234 | 98.02% | +511 tests (defect fixes, deep merge, layers, list rules, provenance, nesting at any depth) |
 
 ## Architecture (v1.10.0)
 
@@ -73,6 +74,7 @@ dataclass_args/
 │   ├── nested_processor.py     # Stage 6: nested dataclasses at any depth
 │   └── value_resolution.py     # Stages 5, 7, 8: @file, append ranges, cli_resolve
 ├── provenance.py           # Provenance recorder and query API
+├── option_collisions.py    # Plans every option string and rejects clashes before registration
 ├── config_applicator.py    # One-level merge, --config file, property overrides
 ├── annotations.py          # Field metadata annotations (cli_short, cli_nested, cli_list_merge, ...)
 ├── type_inspector.py       # Type system utilities
@@ -133,7 +135,7 @@ tests/
 
 ## Quality Metrics
 
-- **Test Execution:** Fast (~3.5s for 723 tests)
+- **Test Execution:** Fast (~10s for 1234 tests)
 - **Test Reliability:** 100% (no flaky tests)
 - **Cognitive Complexity:** All functions CC≤10
 - **Test Clarity:** High (class-based organization, one class per concern)

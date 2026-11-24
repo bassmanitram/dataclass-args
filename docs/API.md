@@ -478,6 +478,7 @@ class DatabaseConfig:
     host: str = "localhost"
     port: int = 5432
     username: str = "admin"
+    password: str = ""
 
 @dataclass
 class AppConfig:
@@ -515,17 +516,17 @@ database: DatabaseConfig = cli_nested(default_factory=DatabaseConfig)
 ```python
 @dataclass
 class ServerConfig:
-    host: str = cli_short("h", default="localhost")
+    host: str = cli_short("H", default="localhost")   # (-h is reserved for --help)
 
 @dataclass
 class Config:
-    # With prefix: -h is ignored (no conflict)
+    # With prefix: -H is ignored (no conflict)
     server: ServerConfig = cli_nested(prefix="srv", default_factory=ServerConfig)
-    # CLI: --srv-host (no -h)
+    # CLI: --srv-host (no -H)
 
-    # No prefix: -h is enabled
+    # No prefix: -H is enabled
     server2: ServerConfig = cli_nested(prefix="", default_factory=ServerConfig)
-    # CLI: -h, --host (short option works)
+    # CLI: -H, --host (short option works)
 ```
 
 **Collision Detection:**
@@ -543,13 +544,15 @@ class Config:
 ```
 
 **Config File Integration:**
-```python
+```yaml
 # config.yaml
 database:
   host: "prod-db.example.com"
   port: 5432
   username: "prod_user"
+```
 
+```python
 # CLI with partial override
 config = build_config(AppConfig, args=[
     '--config', 'config.yaml',
@@ -597,7 +600,7 @@ After the raw value is assembled from all configuration sources (base_configs, c
 - `ConfigurationError` raised by resolver is re-raised without double-wrapping
 
 **Compatibility:**
-- Works with: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- Works with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `combine_annotations`
 - Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - In nested dataclasses: allowed but resolver NOT called (value stays raw; application resolves explicitly)
 
@@ -782,7 +785,7 @@ from dataclass_args import cli_file_loadable
 class Config:
     name: str
     prompt: str = cli_file_loadable(default="Default prompt")
-    content: str = cli_file_loadable()
+    content: str = cli_file_loadable(default="")
 ```
 
 **CLI Usage:**
@@ -851,22 +854,22 @@ Combine multiple annotation functions on a single field.
 
 **Example:**
 ```python
-from dataclass_args import combine_annotations, cli_short, cli_choices, cli_help
+from dataclass_args import combine_annotations, cli_positional, cli_short, cli_choices, cli_help
 
 @dataclass
 class Config:
+    # Combine help + positional (fields without defaults must come first)
+    input_file: str = combine_annotations(
+        cli_positional(),
+        cli_help("Input file path")
+    )
+
     # Combine short option + choices + help
     environment: str = combine_annotations(
         cli_short('e'),
         cli_choices(['dev', 'staging', 'prod']),
         cli_help("Deployment environment"),
         default='dev'
-    )
-
-    # Combine short + help + positional
-    input_file: str = combine_annotations(
-        cli_positional(),
-        cli_help("Input file path")
     )
 
     # Combine short + help
@@ -1017,13 +1020,19 @@ python app.py --name test --count 5 --rate 2.5 --debug \
 
 ### `ConfigBuilderError`
 
-Base exception for configuration building errors.
+Raised for programming errors: problems with the dataclass definition or the builder options. It's raised when the builder is constructed, or in `add_arguments`, before any configuration is loaded.
 
 **Raised when:**
-- Invalid dataclass configuration
-- Conflicting annotations
-- Multiple positional lists
-- Positional list not at end
+- Invalid dataclass configuration, or invalid or conflicting annotations (e.g. `cli_resolve` with `cli_append`, or `cli_list_merge` on a `cli_nested` field)
+- **Option-name collisions.** Every option string the parser would contain is checked before anything is registered:
+  - `-h`/`--help` and the `--config` option;
+  - field long and short options at any nesting depth;
+  - `--no-` flags and dict override options.
+
+  The message lists every claimant and suggests a fix: `cli_override_name()`, a different `cli_short` letter, renaming a field, or a different `base_config_name`.
+- Multiple positional lists, or a positional list that isn't last
+- A `cli_nested` cycle (`A.b -> B.a -> A`)
+- An invalid `merge_strategy`, `list_merge` or `config_list_merge`, or a layered-mode feature used with `merge_strategy="shallow"`
 
 **Example:**
 ```python

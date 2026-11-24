@@ -36,11 +36,21 @@ This release fixes many inconsistencies in how configuration sources are combine
 - **New examples:** `examples/deep_merge_example.py` and `examples/layered_config_example.py`.
 
 ### Fixed
+- **Every option-name clash is now a clear `ConfigBuilderError`.** These used to crash with a raw `argparse.ArgumentError`:
+  - a one-letter dict field (`d: Dict`), whose override `--d` equals its own option;
+  - an override that equals another field's option (`mc` vs `model_config` → `--mc`);
+  - a field named like the config-file option (`config`);
+  - `cli_short('h')`, which clashes with `--help`.
+
+  The error names the option string and every claimant, and suggests the fix (`cli_override_name`, another short letter, or a different `base_config_name`).
+- For a boolean field with custom help, the negative flag's help read `Disable <help text>`, e.g. "Disable Enable debug mode". It now reads `Disable --debug`.
+- `examples/cli_append_example.py` crashed (it used `cli_short("h")`).
 - A `nargs="*"` positional with `cli_choices` exited with an error when no values were given.
 - `make examples`, and therefore `make check`, never ran: the target wasn't `.PHONY`, and its commands passed invalid boolean flags. `make lint`/`make format` pointed at a non-existent `dataclass_config/` directory. Examples now run through `scripts/run_examples.sh`, shared with CI.
 - Error messages for property overrides now name the offending field and its type. Dict-field load errors name the layer.
 
 ### Development
+- All 16 example scripts now run in CI and `make examples` (several were never run, and one was broken).
 - Cognitive complexity ≤ 10 per function is now **enforced** (`flake8-cognitive-complexity` in pre-commit and `.flake8`). Eight functions that exceeded it were refactored without changing behaviour.
 - CI tests Python 3.11–3.14. Single-version jobs run on 3.12, and mypy checks against 3.11.
 
@@ -53,10 +63,15 @@ This release fixes many inconsistencies in how configuration sources are combine
   - `cli_override_name` was missing from API.md;
   - an unclosed code fence in the README (`build_config_from_cli`) and one in API.md (`cli_resolve`) broke the rendering of every section after them;
   - an orphaned, heading-less README snippet is restored as "Config Files, Dict Files and Property Overrides Together";
-  - stale pipeline stage numbers ("Stage 3.8") are corrected.
+  - stale pipeline stage numbers ("Stage 3.8") are corrected;
+  - the README's first Short Options example, and its web-server example, crashed (`cli_short('h')`, which `--help` owns);
+  - several samples weren't valid Python: a required field after a defaulted one, or `cli_file_loadable(cli_help(...))`, which isn't a supported call;
+  - two `--help` samples didn't match the real output;
+  - the "Type Support" dict example and the coverage figures were wrong;
+  - a duplicated "Development Setup" section and a broken COVERAGE.md link are fixed.
 
 ### Tests
-- 1210 tests (up from 723), with 98.17% coverage, on every supported Python version.
+- 1234 tests (up from 723), with 98.02% coverage, on every supported Python version.
 - Existing tests that were changed, because they asserted a defect being fixed or for formatting only:
   - `test_cli_nested.py::…::test_nested_with_non_dict_non_dataclass_in_config` now expects `ConfigurationError` instead of the value being silently discarded;
   - `test_nested_help_text.py::…::test_nested_dataclass_field_shows_parent_context` now expects the recursive flag `--l2-l3-value`;

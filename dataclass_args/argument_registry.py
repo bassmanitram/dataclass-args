@@ -53,6 +53,7 @@ from .append_action import RangeAppendAction
 from .exceptions import ConfigBuilderError
 from .field_analyzer import FieldAnalyzer, compose_override_name
 from .nested_processor import mapping_source
+from .option_collisions import check_option_collisions, plan_option_strings
 
 
 class _ChoicesAllowingNothing(List[Any]):
@@ -113,11 +114,21 @@ class ArgumentRegistry:
             base_config_help: Help text for base config file argument
         """
 
-        # Base config file argument
-        parser.add_argument(f"--{base_config_name}", type=str, help=base_config_help)
-
         # Get flattened fields (handles nested dataclasses)
         flat_fields = self.field_analyzer.flatten_nested_fields(self.config_fields)
+
+        # Fail fast on any option-string clash, before registering anything
+        check_option_collisions(
+            plan_option_strings(
+                self,
+                flat_fields,
+                base_config_name,
+                getattr(parser, "add_help", True),
+            )
+        )
+
+        # Base config file argument
+        parser.add_argument(f"--{base_config_name}", type=str, help=base_config_help)
 
         # Add positional arguments first, then optional arguments
         self._add_positional_arguments(parser, flat_fields)
@@ -628,6 +639,7 @@ class ArgumentRegistry:
         # Get help text and default
         custom_help = get_cli_help(info)
         help_text = custom_help if custom_help else field_name
+        negative_help = f"Disable {cli_name}" if custom_help else f"Disable {help_text}"
         default_value = info.get("default", False)
 
         # Add positive form (--flag or -f)
@@ -646,7 +658,7 @@ class ArgumentRegistry:
             action="store_false",
             dest=dest_name,
             default=argparse.SUPPRESS,
-            help=f"Disable {help_text}",
+            help=negative_help,
         )
 
     def get_argument_type(self, field_type: Type) -> Callable[[str], Any]:

@@ -91,21 +91,23 @@ from dataclass_args import cli_short
 
 @dataclass
 class ServerConfig:
-    host: str = cli_short('h', default="localhost")
+    host: str = cli_short('H', default="localhost")
     port: int = cli_short('p', default=8000)
     debug: bool = cli_short('d', default=False)
 ```
 
 ```bash
 # Use short forms
-$ python server.py -h 0.0.0.0 -p 9000 -d
+$ python server.py -H 0.0.0.0 -p 9000 -d
 
 # Or long forms
 $ python server.py --host 0.0.0.0 --port 9000 --debug
 
 # Mix and match
-$ python server.py -h 0.0.0.0 --port 9000 -d
+$ python server.py -H 0.0.0.0 --port 9000 -d
 ```
+
+`-h` is reserved for `--help`. Every option name is checked when the builder is constructed: short options, long options, `--no-` flags, dict override options and the `--config` option. Any clash raises `ConfigBuilderError`, naming the clashing fields and suggesting a fix.
 
 ### Boolean Flags
 
@@ -413,12 +415,16 @@ $ python app.py -n myapp -e prod -d
 # Clear help output
 $ python app.py --help
 options:
+  -h, --help            show this help message and exit
+  --config CONFIG       Base configuration file (JSON, YAML, or TOML)
   -n NAME, --name NAME  Application name
   -e {dev,staging,prod}, --environment {dev,staging,prod}
-                        Deployment environment (default: dev)
+                        Deployment environment (choices: dev, staging, prod)
   -d, --debug           Enable debug mode (default: False)
-  --no-debug            Disable Enable debug mode
+  --no-debug            Disable --debug
 ```
+
+(Python 3.13+ prints short options without the metavar repeated: `-n, --name NAME`.)
 
 ### Real-World Example
 
@@ -510,9 +516,9 @@ from dataclass_args import cli_file_loadable
 
 @dataclass
 class AppConfig:
-    name: str = cli_help("Application name")
+    name: str = cli_help("Application name", default="app")
     system_prompt: str = cli_file_loadable(default="You are a helpful assistant")
-    welcome_message: str = cli_file_loadable()
+    welcome_message: str = cli_file_loadable(default="Welcome!")
 
 config = build_config(AppConfig)
 ```
@@ -592,15 +598,23 @@ $ python app.py \
 # Help shows all flattened fields
 $ python app.py --help
 options:
-  --app-name APP_NAME
-  --debug / --no-debug
-  --db-host DB_HOST
-  --db-port DB_PORT
+  -h, --help            show this help message and exit
+  --config CONFIG       Base configuration file (JSON, YAML, or TOML)
+  --app-name APP_NAME   app_name
+  --debug               debug (default: False)
+  --no-debug            Disable debug
+  --db-host DB_HOST     database.host
+  --db-port DB_PORT     database.port
   --db-username DB_USERNAME
+                        database.username
   --db-password DB_PASSWORD
+                        database.password
   --cache-host CACHE_HOST
+                        cache.host
   --cache-port CACHE_PORT
+                        cache.port
   --cache-ttl CACHE_TTL
+                        cache.ttl
 ```
 
 #### Prefix Modes
@@ -631,14 +645,14 @@ Short options behave differently based on the prefix:
 ```python
 @dataclass
 class ServerConfig:
-    host: str = cli_short("h", default="localhost")
+    host: str = cli_short("H", default="localhost")
     port: int = cli_short("p", default=8080)
 
 @dataclass
 class Config:
     server: ServerConfig = cli_nested(prefix="srv", default_factory=ServerConfig)
 
-# CLI: --srv-host, --srv-port (no -h or -p for nested fields)
+# CLI: --srv-host, --srv-port (no -H or -p for nested fields)
 ```
 
 **No Prefix** → Short options are **enabled**:
@@ -687,16 +701,16 @@ class Config:
 ```python
 @dataclass
 class Nested:
-    host: str = cli_short("h", default="nested-host")
+    host: str = cli_short("x", default="nested-host")
 
 @dataclass
 class Config:
-    help_text: str = cli_short("h", default="help")
+    proxy: str = cli_short("x", default="none")
     nested: Nested = cli_nested(prefix="", default_factory=Nested)
 
 # ERROR: Short option collision detected:
-#   -h
-#     - help_text (--help-text)
+#   -x
+#     - proxy (--proxy)
 #     - nested.host (--host)
 # Solution: Use different short options or add prefix
 ```
@@ -927,7 +941,7 @@ $ python app.py --plugins "plugins/*.json" "extra/*.yaml"
 
 #### Compatibility
 
-- **Works with**: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- **Works with**: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge` (list rules run on the raw values, before the resolver), `combine_annotations`
 - **Incompatible with** (on same field): `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - **Nested fields**: Allowed in nested dataclasses, but resolver is NOT called (value stays raw)
 
@@ -1027,7 +1041,7 @@ server = instantiate(config)
 ### Custom Help and Annotations
 
 ```python
-from dataclass_args import cli_help, cli_exclude, cli_file_loadable
+from dataclass_args import cli_help, cli_exclude, cli_file_loadable, combine_annotations
 
 @dataclass
 class ServerConfig:
@@ -1036,7 +1050,9 @@ class ServerConfig:
     port: int = cli_help("Server port number", default=8000)
 
     # File-loadable with help
-    ssl_cert: str = cli_file_loadable(cli_help("SSL certificate content"))
+    ssl_cert: str = combine_annotations(
+        cli_file_loadable(), cli_help("SSL certificate content"), default=""
+    )
 
     # Hidden from CLI
     secret_key: str = cli_exclude(default="auto-generated")
@@ -1054,19 +1070,21 @@ from pathlib import Path
 @dataclass
 class MLConfig:
     # Basic types
-    model_name: str = cli_help("Model identifier")
+    model_name: str = cli_help("Model identifier", default="baseline")
     learning_rate: float = cli_help("Learning rate", default=0.001)
     epochs: int = cli_help("Training epochs", default=100)
 
     # Complex types
     layer_sizes: List[int] = cli_help("Neural network layer sizes", default_factory=lambda: [128, 64])
-    hyperparameters: Dict[str, Any] = cli_help("Model hyperparameters")
+    hyperparameters: Dict[str, Any] = cli_help("Model hyperparameters", default_factory=dict)
 
     # Optional types
-    checkpoint_path: Optional[Path] = cli_help("Path to model checkpoint")
+    checkpoint_path: Optional[Path] = cli_help("Path to model checkpoint", default=None)
 
     # File-loadable configurations
-    training_config: str = cli_file_loadable(cli_help("Training configuration"))
+    training_config: str = combine_annotations(
+        cli_file_loadable(), cli_help("Training configuration"), default=""
+    )
 
     def __post_init__(self):
         # Custom validation
@@ -1186,6 +1204,10 @@ By default, dicts from different sources are merged **one level** deep: a nested
 
 ```python
 from dataclass_args import build_config, MERGE_DEEP
+
+@dataclass
+class AppConfig:
+    db: Dict[str, Any] = field(default_factory=dict)
 
 layers = [
     {'db': {'host': 'localhost', 'pool': {'min': 1, 'max': 10}}},
@@ -1433,11 +1455,11 @@ $ python app.py --model-config model.yaml --mc tags.0:first --mc tags.+:last
 ```
 
 **Index rules:**
-- `items.0` — set element at index 0 (list must already exist and index must be in range)
-- `items.+` — append new element to list
+- `items.0` — set element at index 0 (the list must already exist and the index must be in range, otherwise `ConfigurationError`)
+- `items.+` — append new element to list (the list must already exist)
 - `items.0.name` — navigate into list element 0, then set `name` property
 - Negative indices are not supported
-- If the container is a dict (not a list), numeric keys create string dict keys: `{"0": "value"}`
+- If the container is a dict (not a list), `0` and `+` are ordinary string keys: `{"0": "value"}`. So if `items` doesn't exist yet, `items.0:x` creates `{"items": {"0": "x"}}`; set the list first if you want list behaviour
 
 #### Override Name Collisions
 
@@ -1486,12 +1508,15 @@ config = build_config_from_dict(
 
 **Key behaviors:**
 - `@file` references resolved for `cli_file_loadable` fields (loads file content)
-- Dict-file paths (`.json`/`.yaml`/`.toml`) loaded for dict-typed fields
+- Dict-file paths (`.json`/`.yaml`/`.yml`/`.toml`) loaded for dict-typed fields, including inside nested dataclasses
 - `cli_resolve()` resolvers fire on assembled values
-- Nested dataclasses (`cli_nested`) reconstruct from nested dicts
-- `base_configs` support with same precedence rules as CLI mode
-- Fields with defaults work when omitted from the dict
+- Nested dataclasses (`cli_nested`, any depth) reconstruct from nested dicts or instances
+- `base_configs` support with same precedence rules as CLI mode (including `ConfigLayer`, `merge_strategy` and provenance)
+- Fields with defaults work when omitted from the dict; an explicit `None` clears a value
+- Every positional field can be set (there is no command line to require it)
+- Hyphenated field names (`"db-host"`) are accepted
 - `cli_exclude()` fields are settable (no CLI to exclude from)
+- Never exits the process: errors are raised as `ConfigurationError` / `ConfigBuilderError`
 - Only accepts `Dict[str, Any]` — raises `TypeError` for non-dict inputs
 
 **What does NOT apply via dict:**
@@ -1660,7 +1685,7 @@ sandbox: Optional[SandboxBase] = combine_annotations(
 
 **Important:**
 - Resolver is NOT called when value is None
-- Compatible with: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- Compatible with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `combine_annotations`
 - Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - In nested dataclasses: allowed but resolver NOT called (value stays raw)
 
@@ -1717,7 +1742,7 @@ Dataclass CLI supports standard Python types:
 | `float` | Parsed as float | `--rate 0.1` |
 | `bool` | Flag with negative | `--debug` or `--no-debug` |
 | `List[T]` | Multiple values | `--items a b c` |
-| `Dict[str, Any]` | Config file + property overrides | `--config file.json --c key:value --c items.0:new` |
+| `Dict[str, Any]` | Dict or structured file + property overrides | `--model-config m.json --mc temperature:0.9 --mc tags.0:new` |
 | `Optional[T]` | Optional parameter | `--timeout 30` (or omit) |
 | `Path` | Path object | `--output /path/to/file` |
 | Custom types | String representation | `--custom "value"` |
@@ -1761,17 +1786,26 @@ port = 5432
 
 Check the [`examples/`](examples/) directory for complete working examples:
 
+- **`basic_example.py`** / **`advanced_example.py`** - Getting started; file loading and config files
 - **`positional_example.py`** - Positional arguments and variable length args
 - **`boolean_flags_example.py`** - Boolean flags with `--flag` and `--no-flag`
 - **`cli_choices_example.py`** - Value validation with choices
 - **`cli_short_example.py`** - Short option flags
+- **`cli_append_example.py`** - Repeatable options (`cli_append`)
+- **`nested_dataclass.py`** / **`nested_short_options.py`** - Nested dataclasses and their short options
+- **`config_merging_example.py`** - `base_configs` and `--config` precedence
+- **`deep_merge_example.py`** - Shallow vs deep merge
+- **`layered_config_example.py`** - Named layers, list-merge rules and provenance
 - **`cli_resolve_example.py`** - Post-load field resolution with factory pattern
+- **`programmatic_example.py`** - `build_config_from_dict()` without a CLI
+- **`custom_description_example.py`** - Custom parser descriptions
 - **`all_features_example.py`** - All features together
 - And more...
 
 ### Web Server Configuration
 
 ```python
+import os
 from dataclasses import dataclass
 from typing import List
 from dataclass_args import build_config, cli_short, cli_help, cli_exclude, cli_file_loadable, combine_annotations
@@ -1780,7 +1814,7 @@ from dataclass_args import build_config, cli_short, cli_help, cli_exclude, cli_f
 class ServerConfig:
     # Basic server settings
     host: str = combine_annotations(
-        cli_short('h'),
+        cli_short('H'),
         cli_help("Server bind address"),
         default="127.0.0.1"
     )
@@ -1798,8 +1832,12 @@ class ServerConfig:
     )
 
     # Security settings
-    ssl_cert: str = cli_file_loadable(cli_help("SSL certificate content"))
-    ssl_key: str = cli_file_loadable(cli_help("SSL private key content"))
+    ssl_cert: str = combine_annotations(
+        cli_file_loadable(), cli_help("SSL certificate content"), default=""
+    )
+    ssl_key: str = combine_annotations(
+        cli_file_loadable(), cli_help("SSL private key content"), default=""
+    )
 
     # Application settings
     debug: bool = combine_annotations(
@@ -1820,7 +1858,7 @@ if __name__ == "__main__":
 
 ```bash
 # Start server with short options
-$ python server.py -h 0.0.0.0 -p 9000 -w 4 -d
+$ python server.py -H 0.0.0.0 -p 9000 -w 4 -d
 
 # Load SSL certificates from files
 $ python server.py --ssl-cert "@certs/server.crt" --ssl-key "@certs/server.key"
@@ -1829,14 +1867,6 @@ $ python server.py --ssl-cert "@certs/server.crt" --ssl-key "@certs/server.key"
 ## Contributing
 
 Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-```bash
-git clone https://github.com/bassmanitram/dataclass-args.git
-cd dataclass-args
-pip install -e ".[dev,all]"
-```
 
 ### Development Setup
 
@@ -1869,13 +1899,13 @@ pytest -v
 
 ### Code Coverage
 
-This project maintains **94%+ code coverage**. Coverage reports are generated automatically when running tests.
+This project maintains **98%+ code coverage** (branch coverage). Coverage reports are generated automatically when running tests.
 
 - **Quick check**: `make coverage`
 - **Detailed report**: See `htmlcov/index.html`
-- **Coverage docs**: [COVERAGE.md](COVERAGE.md)
+- **Coverage docs**: [COVERAGE.md](docs/COVERAGE.md)
 
-All code changes should maintain or improve coverage. The minimum required coverage is 90%.
+All code changes should maintain or improve coverage. CI fails below 88%.
 
 ### Code Formatting
 

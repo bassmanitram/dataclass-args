@@ -39,6 +39,7 @@ dataclass_args/
 ├── builder.py              # GenericConfigBuilder - thin orchestrator (analyser + registry + resolver)
 ├── field_analyzer.py       # Field inspection, validation, collisions, cycle guard, list-rule map
 ├── argument_registry.py    # argparse registration (field → add_argument), help text, override names
+├── option_collisions.py    # Plans every option string; any clash → ConfigBuilderError before registration
 ├── config_resolver.py      # The 9-stage pipeline (see State & Data Flow)
 ├── config_merging.py       # ConfigLayer, base_configs normalisation (labels), layer stacking
 ├── merge_strategy.py       # MERGE_SHALLOW/DEEP, MergeContext (per-call), combine_dicts, merge_with_rules
@@ -54,7 +55,7 @@ dataclass_args/
 ├── utils.py                # load_structured_file, deep_merge, copy_containers, fresh_field_default
 ├── instantiate.py          # instantiate() - object construction from config
 └── exceptions.py           # ConfigBuilderError (programming errors) / ConfigurationError (config errors)
-tests/                      # 1210 tests, ~98% coverage, Python 3.11–3.14
+tests/                      # 1234 tests, ~98% coverage, Python 3.11–3.14
 ```
 
 **Navigation Guide**:
@@ -99,7 +100,7 @@ These rules MUST be maintained:
 4. **Nested field collision detection**: No duplicate CLI names from flattened nested fields
    - **Why**: Ambiguous which field gets the value (e.g., `app.name` vs `db.name` both become `--name`)
    - **Breaks if violated**: `ConfigBuilderError` with collision details
-   - **Enforced by**: `NestedFieldProcessor._check_collision()` during flattening (all depths), plus short-option and override-name collision checks in `FieldAnalyzer`
+   - **Enforced by**: `NestedFieldProcessor._check_collision()` during flattening (all depths), short-option and override-name checks in `FieldAnalyzer`, and a final whole-parser plan in `option_collisions.py` (run by `add_arguments` before anything is registered) that also covers `-h/--help`, the `--config` option, `--no-` flags and dict override options
 
 5. **Caller data is never mutated or aliased**: every layer is copied at intake (`copy_containers`: dicts/lists at every depth; other objects by reference)
    - **Breaks if violated**: property overrides/appends write into the caller's dicts; the instance holds caller objects
