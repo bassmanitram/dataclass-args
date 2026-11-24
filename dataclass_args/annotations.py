@@ -280,6 +280,39 @@ def cli_file_loadable(**kwargs) -> Any:
     return field(**field_kwargs)
 
 
+def _validate_append_args(
+    nargs: Optional[Any], min_args: Optional[int], max_args: Optional[int]
+) -> None:
+    """Validate the argument-count parameters of cli_append."""
+    # Validate mutually exclusive parameters
+    if nargs is not None and (min_args is not None or max_args is not None):
+        raise ValueError(
+            "cli_append: 'nargs' and 'min_args'/'max_args' are mutually exclusive. "
+            "Use either nargs for standard argparse behavior, or min_args/max_args for range validation."
+        )
+
+    # Validate min_args/max_args must be used together
+    if (min_args is not None) != (max_args is not None):
+        raise ValueError(
+            "cli_append: 'min_args' and 'max_args' must be used together. "
+            f"Got min_args={min_args}, max_args={max_args}"
+        )
+
+    # Validate range constraints
+    if min_args is not None and max_args is not None:
+        _validate_append_range(min_args, max_args)
+
+
+def _validate_append_range(min_args: int, max_args: int) -> None:
+    """Validate the min_args/max_args range of cli_append."""
+    if min_args < 1:
+        raise ValueError(f"cli_append: 'min_args' must be >= 1, got {min_args}")
+    if max_args < min_args:
+        raise ValueError(
+            f"cli_append: 'max_args' ({max_args}) must be >= min_args ({min_args})"
+        )
+
+
 def cli_append(
     nargs: Optional[Any] = None,
     min_args: Optional[int] = None,
@@ -317,48 +350,89 @@ def cli_append(
         - Always use default_factory=list for append fields
         - Cannot be combined with cli_positional()
     """
-    # Validate mutually exclusive parameters
-    if nargs is not None and (min_args is not None or max_args is not None):
-        raise ValueError(
-            "cli_append: 'nargs' and 'min_args'/'max_args' are mutually exclusive. "
-            "Use either nargs for standard argparse behavior, or min_args/max_args for range validation."
-        )
-
-    # Validate min_args/max_args must be used together
-    if (min_args is not None) != (max_args is not None):
-        raise ValueError(
-            "cli_append: 'min_args' and 'max_args' must be used together. "
-            f"Got min_args={min_args}, max_args={max_args}"
-        )
-
-    # Validate range constraints
-    if min_args is not None and max_args is not None:
-        if min_args < 1:
-            raise ValueError(f"cli_append: 'min_args' must be >= 1, got {min_args}")
-        if max_args < min_args:
-            raise ValueError(
-                f"cli_append: 'max_args' ({max_args}) must be >= min_args ({min_args})"
-            )
+    _validate_append_args(nargs, min_args, max_args)
 
     field_kwargs = kwargs.copy()
     metadata = field_kwargs.pop("metadata", {})
     metadata["cli_append"] = True
 
-    if nargs is not None:
-        metadata["cli_append_nargs"] = nargs
+    optional_metadata = {
+        "cli_append_nargs": nargs,
+        "cli_append_metavar": metavar,
+        "cli_append_min_args": min_args,
+        "cli_append_max_args": max_args,
+    }
+    metadata.update(
+        {key: value for key, value in optional_metadata.items() if value is not None}
+    )
 
-    if metavar is not None:
-        metadata["cli_append_metavar"] = metavar
-
-    if min_args is not None:
-        metadata["cli_append_min_args"] = min_args
-
-    if max_args is not None:
-        metadata["cli_append_max_args"] = max_args
     # Move 'help' to metadata if present (dataclass field() doesn't accept it)
     if "help" in field_kwargs:
         metadata["cli_help"] = field_kwargs.pop("help")
 
+    field_kwargs["metadata"] = metadata
+    return field(**field_kwargs)
+
+
+LIST_MERGE_APPEND = "append"
+LIST_MERGE_APPEND_UNIQUE = "append_unique"
+LIST_MERGE_MODES = (LIST_MERGE_APPEND, LIST_MERGE_APPEND_UNIQUE)
+
+
+def _validate_list_merge_paths(paths: Optional[List[str]]) -> None:
+    """Validate the dotted paths given to cli_list_merge."""
+    if paths is None:
+        return
+    if len(paths) == 0:
+        raise ValueError("cli_list_merge: 'paths' must not be an empty list")
+    for path in paths:
+        if not isinstance(path, str) or "" in path.split("."):
+            raise ValueError(
+                f"cli_list_merge: invalid path {path!r} "
+                "(must be non-empty dotted segments, e.g. 'policy.denied')"
+            )
+
+
+def cli_list_merge(mode: str, paths: Optional[List[str]] = None, **kwargs) -> Any:
+    """
+    Mark a field so that lists at its location are combined, not replaced.
+
+    The rule only acts when a ``ConfigLayer(..., list_merge="rules")`` layer (or
+    ``build_config_from_dict(..., config_list_merge="rules")``) is merged with
+    ``merge_strategy="deep"``, and only where both layers hold a list there.
+    CLI values and the --config file always replace.
+
+    Args:
+        mode: "append" (earlier list + later list) or "append_unique" (earlier
+              list + later elements not already present, compared with ==)
+        paths: For dict-typed fields, the dotted paths inside the dict whose
+               lists are combined (e.g. ["roots", "policy.denied"]). Must be
+               omitted for list-typed fields.
+        **kwargs: Additional field parameters (default_factory, etc.)
+
+    Returns:
+        Field object with list-merge metadata
+
+    Raises:
+        ValueError: If mode is invalid, or paths is empty or has an empty segment
+
+    Note:
+        Cannot be used on a cli_nested field: annotate the fields inside the
+        nested dataclass instead (rules apply at any nesting depth).
+    """
+    if mode not in LIST_MERGE_MODES:
+        raise ValueError(
+            f"cli_list_merge: mode must be one of {list(LIST_MERGE_MODES)}, "
+            f"got {mode!r}"
+        )
+    _validate_list_merge_paths(paths)
+
+    field_kwargs = kwargs.copy()
+    metadata = field_kwargs.pop("metadata", {})
+    metadata["cli_list_merge"] = {
+        "mode": mode,
+        "paths": list(paths) if paths else None,
+    }
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
 
@@ -600,6 +674,11 @@ def get_cli_short(field_info: Dict[str, Any]) -> Optional[str]:
 def get_cli_choices(field_info: Dict[str, Any]) -> Optional[List[Any]]:
     """Get restricted choices for a CLI argument."""
     return _FieldMetadata.get(field_info, "cli_choices")
+
+
+def get_cli_list_merge(field_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Get the list-merge rule ({"mode": ..., "paths": ...}) of a field, if any."""
+    return _FieldMetadata.get(field_info, "cli_list_merge")
 
 
 def get_cli_append_nargs(field_info: Dict[str, Any]) -> Optional[Any]:

@@ -5,6 +5,7 @@ Complete API documentation for dataclass-args.
 ## Table of Contents
 
 - [Main Functions](#main-functions)
+- [Layered Configuration](#layered-configuration)
 - [Annotation Functions](#annotation-functions)
 - [Advanced Classes](#advanced-classes)
 - [Type Support](#type-support)
@@ -18,20 +19,32 @@ Complete API documentation for dataclass-args.
 
 ## Main Functions
 
-### `build_config(config_class, args=None)`
+All three entry points share the following merge and layering parameters (and so does `GenericConfigBuilder.build_config`):
 
-The primary function for generating CLI from a dataclass. Simplified convenience function suitable for most use cases.
+| Parameter | Default | Meaning |
+|---|---|---|
+| `base_configs` | `None` | Lowest-precedence sources: a file path (`str`), a `dict`, a [`ConfigLayer`](#configlayerdata-namenone-list_mergereplace), or a list mixing them. Applied in order, so later ones win. |
+| `merge_strategy` | `"shallow"` | How dicts from different sources combine: `"shallow"` merges top-level keys (nested dicts are replaced); `"deep"` merges at every depth. Any other value raises `ConfigBuilderError` before any file is loaded. See [Deep Merge](#deep_mergebase-override). |
+| `return_provenance` | `False` | `True` (deep mode only) returns `(instance, Provenance)`. See [Provenance](#provenance). |
+
+Precedence (later wins): `base_configs[0] < base_configs[1] < … < --config file < CLI arguments`. Lists replace (except in [rules layers](#cli_list_mergemode-pathsnone-kwargs)), and an explicit `None` clears a value.
+
+### `build_config(config_class, args=None, base_configs=None, description=None, merge_strategy="shallow", return_provenance=False)`
+
+The primary function for generating a CLI from a dataclass.
 
 **Parameters:**
-- `config_class` (Type[dataclass]): The dataclass to convert to CLI
-- `args` (Optional[List[str]]): Command-line arguments to parse. Defaults to `sys.argv[1:]`
+- `config_class` (Type[dataclass]): the dataclass to convert to a CLI.
+- `args` (Optional[List[str]]): command-line arguments to parse. Defaults to `sys.argv[1:]`.
+- `description` (Optional[str]): ArgumentParser description. Defaults to `"Build <ClassName> from CLI"`.
+- `base_configs`, `merge_strategy`, `return_provenance`: see the table above.
 
-**Returns:**
-- Instance of `config_class` with values parsed from CLI arguments
+**Returns:** an instance of `config_class`, or `(instance, Provenance)` when `return_provenance=True`.
 
 **Raises:**
-- `SystemExit`: If argument parsing fails or `--help` is requested
-- `ConfigBuilderError`: If the dataclass configuration is invalid
+- `SystemExit`: argument parsing failed, or `--help` was requested.
+- `ConfigBuilderError`: the dataclass annotations, `merge_strategy` or the layer options are invalid.
+- `ConfigurationError`: a configuration source couldn't be loaded or applied.
 
 **Example:**
 ```python
@@ -43,30 +56,20 @@ class Config:
     name: str
     port: int = 8000
 
-# Parse from sys.argv
-config = build_config(Config)
-
-# Parse from custom args
+config = build_config(Config)                                   # parse sys.argv
 config = build_config(Config, args=['--name', 'myapp', '--port', '9000'])
+config = build_config(Config, args=['--name', 'x'], base_configs='defaults.yaml')
 ```
 
 ---
 
-### `build_config_from_cli(config_class, args=None, **options)`
+### `build_config_from_cli(config_class, args=None, base_config_name="config", base_configs=None, description=None, merge_strategy="shallow", return_provenance=False)`
 
-Advanced function with additional configuration options. Provides full control over CLI generation.
+Like `build_config`, plus control over the name of the config-file option.
 
 **Parameters:**
-- `config_class` (Type[dataclass]): The dataclass to convert to CLI
-- `args` (Optional[List[str]]): Command-line arguments to parse
-- `**options`: Additional configuration options:
-  - `base_config_name` (str): Name for base config file argument (default: `'config'`)
-  - `prog` (str): Program name for help text
-  - `description` (str): Program description for help text
-  - `epilog` (str): Text to display after help
-
-**Returns:**
-- Instance of `config_class` with values parsed from arguments
+- `base_config_name` (str): name of the config-file option (`--config` by default). The file it names is applied after `base_configs` and before CLI arguments.
+- Everything else: as for `build_config`.
 
 **Example:**
 ```python
@@ -74,59 +77,98 @@ from dataclass_args import build_config_from_cli
 
 config = build_config_from_cli(
     Config,
-    args=['--name', 'test'],
-    prog='myapp',
+    args=['--settings', 'prod.yaml', '--name', 'test'],
+    base_config_name='settings',          # --settings instead of --config
+    base_configs=['defaults.yaml', {'debug': True}],
     description='My Application CLI',
 )
 ```
 
-### `build_config_from_dict(config_class, config)`
+---
 
-Build a dataclass instance from a plain dictionary with full resolution. No CLI, no argparse — recommended for Lambda handlers, SDKs, and test harnesses.
+### `build_config_from_dict(config_class, config, base_configs=None, config_list_merge="replace", merge_strategy="shallow", return_provenance=False)`
+
+Build a dataclass instance from a plain dictionary, with the full resolution pipeline. There's no command line. This is the recommended entry point for Lambda handlers, SDKs and test harnesses.
 
 **Parameters:**
-- `config_class` (Type[dataclass]): The dataclass to instantiate
-- `config` (Dict[str, Any]): Dictionary of field values
+- `config_class` (Type[dataclass]): the dataclass to instantiate.
+- `config` (Dict[str, Any]): field values. This has the highest precedence. Hyphenated field names (`db-host`) are accepted.
+- `config_list_merge` (str): `"replace"` (default) or `"rules"`. With `"rules"` (deep mode only), `config` is treated as a [rules layer](#cli_list_mergemode-pathsnone-kwargs), so its annotated lists append onto `base_configs`.
+- `base_configs`, `merge_strategy`, `return_provenance`: see the table above. In deep mode, `config` is applied as a single layer named `"config"`.
 
-**Returns:**
-- Instance of `config_class` with all values resolved
+**Returns:** an instance of `config_class`, or `(instance, Provenance)`.
 
 **Raises:**
-- `TypeError`: If `config` is not a dict
-- `ConfigurationError`: If resolution fails
+- `TypeError`: `config` is not a dict.
+- `ConfigBuilderError`: invalid options (for example `config_list_merge="rules"` with shallow merge).
+- `ConfigurationError`: resolution failed, including a missing required field or positional. This function **never** calls `sys.exit`.
 
-**Features that work:**
-- Nested dataclass reconstruction (`cli_nested`)
-- `cli_resolve()` post-load resolution
-- Default value handling for omitted fields
-- `cli_exclude()` fields settable via dict
+**What works:**
+- `@file` references for `cli_file_loadable` fields;
+- dict-field file paths (`.json`, `.yaml`, `.yml`, `.toml`);
+- `cli_resolve()` resolvers;
+- `cli_nested` dataclasses at any depth (given as dicts or instances);
+- `cli_exclude()` fields;
+- every positional field (there's no command line to require them);
+- explicit `None` to clear a value.
 
-**Features that do NOT work:**
-- `@file` loading (`cli_file_loadable`) — load files yourself before passing
-- `cli_choices()` validation — argparse enforces choices, not base_configs
+**What doesn't apply:** `cli_choices()` validation. Choices are enforced by argparse, and a dict bypasses argparse.
 
 **Example:**
 ```python
 from dataclass_args import build_config_from_dict
 
-@dataclass
-class AppConfig:
-    name: str = "default"
-    port: int = 8000
-    database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
-
-# Build from dict (e.g., Lambda event, API payload, test fixture)
 config = build_config_from_dict(AppConfig, {
     "name": "production",
     "port": 8080,
     "database": {"host": "prod-db.example.com", "port": 5432},
 })
 
-# Non-dict input raises TypeError with helpful message
+# Layered, with list rules and provenance
+config, prov = build_config_from_dict(
+    AppConfig, {"plugins": ["runtime"]},
+    base_configs=["defaults.yaml"],
+    merge_strategy="deep", config_list_merge="rules", return_provenance=True,
+)
+
 build_config_from_dict(AppConfig, "not_a_dict")  # TypeError
 ```
 
 ---
+
+## Layered Configuration
+
+### `ConfigLayer(data, name=None, list_merge="replace")`
+
+A frozen dataclass describing one configuration layer. It's accepted anywhere `base_configs` accepts a path or a dict.
+
+- `data` (str | dict): a file path, loaded like a plain `base_configs` string, or a dict, which is copied and never mutated.
+- `name` (Optional[str]): the layer name used in provenance and error messages. When it's omitted, the name is the file path, or `base_configs[i]` for a dict.
+- `list_merge` (str): `"replace"` (default) or `"rules"`. In a rules layer, fields annotated with [`cli_list_merge`](#cli_list_mergemode-pathsnone-kwargs) append instead of replacing. Rules require `merge_strategy="deep"`.
+
+Invalid arguments raise `ConfigBuilderError` when the layer is constructed.
+
+### Provenance
+
+`return_provenance=True` (deep mode only) returns `(instance, Provenance)`.
+
+| Method | Returns |
+|---|---|
+| `entries(path) -> List[ProvenanceEntry]` | Every event at `path`, in order (`[]` if there are none). |
+| `source(path) -> Optional[str]` | The layer that set the final value; `"default"` for an unset dataclass field; otherwise `None` (unknown or removed paths, unset keys inside dict fields, `cli_nested` container paths). |
+| `paths() -> List[str]` | The existing leaf paths set by layers, sorted. |
+| `changes() -> List[ProvenanceChange]` | Every place where a later layer discarded an earlier value (`replaced`, `cleared`, `removed`), in order. |
+| `explain() -> str` | A plain-text `path \| source \| value` table, followed by the defaults. |
+
+- **Entries.** `ProvenanceEntry(layer, value, action)`. The action is one of `set`, `replaced`, `confirmed` (same value again), `cleared` (explicit `None`), `appended` (list rule) or `removed` (a sub-tree replaced by a non-dict, or a leaf replaced by a dict).
+- **Changes.** `ProvenanceChange(path, from_layer, from_value, to_layer, to_value, action)`. For `removed`, `to_value is MISSING_VALUE`.
+- **Paths** are dotted keys. Dicts are recursed into, and lists, scalars and objects are leaves.
+- **Raw values.** Values are recorded after files are loaded and before `@file` and `cli_resolve` resolution, so the instance holds the resolved values.
+- **Layer names:**
+  - the `ConfigLayer` name, otherwise the default above;
+  - `config_file:<path>` for the config-file option;
+  - `config` for the `build_config_from_dict` dict;
+  - `cli` for command-line values.
 
 ---
 
@@ -436,6 +478,7 @@ class DatabaseConfig:
     host: str = "localhost"
     port: int = 5432
     username: str = "admin"
+    password: str = ""
 
 @dataclass
 class AppConfig:
@@ -473,17 +516,17 @@ database: DatabaseConfig = cli_nested(default_factory=DatabaseConfig)
 ```python
 @dataclass
 class ServerConfig:
-    host: str = cli_short("h", default="localhost")
+    host: str = cli_short("H", default="localhost")   # (-h is reserved for --help)
 
 @dataclass
 class Config:
-    # With prefix: -h is ignored (no conflict)
+    # With prefix: -H is ignored (no conflict)
     server: ServerConfig = cli_nested(prefix="srv", default_factory=ServerConfig)
-    # CLI: --srv-host (no -h)
+    # CLI: --srv-host (no -H)
 
-    # No prefix: -h is enabled
+    # No prefix: -H is enabled
     server2: ServerConfig = cli_nested(prefix="", default_factory=ServerConfig)
-    # CLI: -h, --host (short option works)
+    # CLI: -H, --host (short option works)
 ```
 
 **Collision Detection:**
@@ -501,13 +544,15 @@ class Config:
 ```
 
 **Config File Integration:**
-```python
+```yaml
 # config.yaml
 database:
   host: "prod-db.example.com"
   port: 5432
   username: "prod_user"
+```
 
+```python
 # CLI with partial override
 config = build_config(AppConfig, args=[
     '--config', 'config.yaml',
@@ -548,14 +593,14 @@ After the raw value is assembled from all configuration sources (base_configs, c
 - Field type should be the FINAL type (e.g., `Optional[Sandbox]`) for correct type checking
 - For **list fields**: retains natural list parsing (nargs), resolver receives assembled list
 - For **non-list fields**: treated as dict field (file path + property overrides)
-- After all config assembly, resolver is called on non-None values (Stage 3.8 in pipeline)
+- After all config assembly, resolver is called on non-None values (stage 8 of the pipeline)
 - None values bypass the resolver (natural Optional semantics)
 - Resolver is always called for non-None values — resolver handles pass-through for pre-built objects
 - Resolver exceptions wrapped in `ConfigurationError` with field context
 - `ConfigurationError` raised by resolver is re-raised without double-wrapping
 
 **Compatibility:**
-- Works with: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- Works with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `combine_annotations`
 - Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - In nested dataclasses: allowed but resolver NOT called (value stays raw; application resolves explicitly)
 
@@ -610,6 +655,7 @@ config = build_config(
     args=[],
     base_configs={'sandbox': DockerSandbox(image='pre-built:latest')}
 )
+```
 
 **List field example:**
 ```python
@@ -644,13 +690,15 @@ python app.py --config app.yaml
 
 **Pipeline Position:**
 ```
-Stage 1: Normalize base configs
-Stage 2: Apply config file
-Stage 3: Apply CLI overrides
-Stage 3.5: Reconstruct nested fields
-Stage 3.75: Validate append ranges
-Stage 3.8: Resolve fields ← cli_resolve runs here
-Stage 4: Create dataclass instance
+Stage 1: Normalize layers (file refs loaded, keys normalized, nested instances → dicts)
+Stage 2: Apply base_configs (one-level or deep merge; list rules in rules layers)
+Stage 3: Apply config file
+Stage 4: Apply CLI overrides
+Stage 5: Resolve raw values (@file references)
+Stage 6: Reconstruct nested dataclasses (any depth)
+Stage 7: Validate append ranges
+Stage 8: Resolve fields ← cli_resolve runs here
+Stage 9: Create dataclass instance
 ```
 
 **Error Handling:**
@@ -737,7 +785,7 @@ from dataclass_args import cli_file_loadable
 class Config:
     name: str
     prompt: str = cli_file_loadable(default="Default prompt")
-    content: str = cli_file_loadable()
+    content: str = cli_file_loadable(default="")
 ```
 
 **CLI Usage:**
@@ -750,6 +798,46 @@ python app.py --name myapp --prompt "@prompts/system.txt"
 
 # File content is read and assigned to the field
 ```
+
+---
+
+### `cli_override_name(name, **kwargs)`
+
+Sets the abbreviation of a dict field's property-override option. By default it's built from the field name's initials (`model_config` → `--mc`). Use this to resolve collisions: two dict fields that would produce the same abbreviation raise `ConfigBuilderError` when the builder is constructed.
+
+```python
+sandbox_config: Dict[str, Any] = field(default_factory=dict)                   # --sc
+skills_config: Dict[str, Any] = cli_override_name("sk", default_factory=dict)  # --sk
+```
+
+---
+
+### `cli_list_merge(mode, paths=None, **kwargs)`
+
+Makes a list merge by **appending** when it comes from a `list_merge="rules"` [`ConfigLayer`](#configlayerdata-namenone-list_mergereplace), or from the `build_config_from_dict` config with `config_list_merge="rules"`. Everywhere else it replaces as usual: in plain layers, the config-file option and CLI arguments.
+
+- `mode`: `"append"` (concatenate) or `"append_unique"` (add only the elements not already present, compared with `==`; existing order is kept; unhashable elements work).
+- `paths`:
+  - `None` for a `List[...]` field, so the rule applies to the field itself;
+  - required for a dict field: a list of dotted paths to lists inside the dict, such as `["roots", "policy.denied"]`.
+
+The rule applies only where both the earlier and the later value are lists. Otherwise the later value wins, and `None` clears.
+
+```python
+plugins: List[str] = combine_annotations(cli_list_merge("append_unique"), default_factory=list)
+skills: Dict[str, Any] = combine_annotations(
+    cli_list_merge("append_unique", paths=["roots", "policy.denied"]), default_factory=dict)
+```
+
+**Validation.**
+- An invalid `mode`, or an empty path, raises `ValueError` when the annotation is created.
+- These raise `ConfigBuilderError` when the builder is constructed:
+  - `paths` on a list field;
+  - a dict field without `paths`;
+  - a field that's neither a list nor a dict;
+  - a `cli_nested` field. Annotate the nested class's own fields instead; rules apply at any depth.
+
+**Compatible with:** `cli_resolve`, `cli_append`, `cli_help`, `cli_short`, `cli_positional`, `cli_exclude`. No CLI arguments are added.
 
 ---
 
@@ -766,22 +854,22 @@ Combine multiple annotation functions on a single field.
 
 **Example:**
 ```python
-from dataclass_args import combine_annotations, cli_short, cli_choices, cli_help
+from dataclass_args import combine_annotations, cli_positional, cli_short, cli_choices, cli_help
 
 @dataclass
 class Config:
+    # Combine help + positional (fields without defaults must come first)
+    input_file: str = combine_annotations(
+        cli_positional(),
+        cli_help("Input file path")
+    )
+
     # Combine short option + choices + help
     environment: str = combine_annotations(
         cli_short('e'),
         cli_choices(['dev', 'staging', 'prod']),
         cli_help("Deployment environment"),
         default='dev'
-    )
-
-    # Combine short + help + positional
-    input_file: str = combine_annotations(
-        cli_positional(),
-        cli_help("Input file path")
     )
 
     # Combine short + help
@@ -829,16 +917,16 @@ Add all dataclass arguments to an ArgumentParser.
 - `base_config_name` (str): Name for base config file argument
 - `base_config_help` (str): Help text for base config argument
 
-#### `build_config(args, base_config_name='config')`
+#### `build_config(args, base_config_name=None, base_configs=None, merge_strategy="shallow", return_provenance=False)`
 
-Build dataclass instance from parsed CLI arguments.
+Build a dataclass instance from parsed CLI arguments.
 
 **Parameters:**
-- `args` (argparse.Namespace): Parsed arguments from ArgumentParser
-- `base_config_name` (str): Name of base config file argument
+- `args` (argparse.Namespace): parsed arguments from the ArgumentParser.
+- `base_config_name` (Optional[str]): name of the config-file argument (`config` by default).
+- `base_configs`, `merge_strategy`, `return_provenance`: as for [the main functions](#main-functions).
 
-**Returns:**
-- Instance of the configured dataclass
+**Returns:** an instance of the configured dataclass, or `(instance, Provenance)`.
 
 **Example:**
 ```python
@@ -932,13 +1020,19 @@ python app.py --name test --count 5 --rate 2.5 --debug \
 
 ### `ConfigBuilderError`
 
-Base exception for configuration building errors.
+Raised for programming errors: problems with the dataclass definition or the builder options. It's raised when the builder is constructed, or in `add_arguments`, before any configuration is loaded.
 
 **Raised when:**
-- Invalid dataclass configuration
-- Conflicting annotations
-- Multiple positional lists
-- Positional list not at end
+- Invalid dataclass configuration, or invalid or conflicting annotations (e.g. `cli_resolve` with `cli_append`, or `cli_list_merge` on a `cli_nested` field)
+- **Option-name collisions.** Every option string the parser would contain is checked before anything is registered:
+  - `-h`/`--help` and the `--config` option;
+  - field long and short options at any nesting depth;
+  - `--no-` flags and dict override options.
+
+  The message lists every claimant and suggests a fix: `cli_override_name()`, a different `cli_short` letter, renaming a field, or a different `base_config_name`.
+- Multiple positional lists, or a positional list that isn't last
+- A `cli_nested` cycle (`A.b -> B.a -> A`)
+- An invalid `merge_strategy`, `list_merge` or `config_list_merge`, or a layered-mode feature used with `merge_strategy="shallow"`
 
 **Example:**
 ```python
@@ -1002,6 +1096,22 @@ except InstantiationError as e:
 
 ## Utility Functions
 
+### `deep_merge(base, override)`
+
+Returns a **new** dict with `override` recursively merged onto `base`. Neither input is mutated, and every dict and list in the result is a fresh container.
+
+- Two dicts at the same key are merged recursively.
+- Any other combination: the override wins. That includes lists (which replace) and `None` (which clears).
+- Keys only in `base` are kept.
+- Dataclass instances and other objects aren't recursed into.
+
+```python
+deep_merge({'db': {'host': 'h', 'pool': {'min': 1}}}, {'db': {'pool': {'max': 5}}})
+# {'db': {'host': 'h', 'pool': {'min': 1, 'max': 5}}}
+```
+
+`MERGE_SHALLOW` (`"shallow"`) and `MERGE_DEEP` (`"deep"`) are exported as constants for `merge_strategy`.
+
 ### `load_structured_file(file_path)`
 
 Load structured data from JSON, YAML, or TOML file.
@@ -1020,7 +1130,7 @@ Automatically detects file format based on extension and attempts to parse.
 **Supported Formats:**
 - `.json` - JSON files
 - `.yaml`, `.yml` - YAML files (requires PyYAML)
-- `.toml` - TOML files (requires tomli on Python < 3.11)
+- `.toml` - TOML files (built in via `tomllib`)
 
 ---
 

@@ -5,6 +5,80 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.10.0] - 2026-11-24
+
+### Breaking
+- **Python 3.11+ is now required.** Support for 3.8, 3.9 and 3.10 (all end-of-life) is dropped. The supported and tested versions are 3.11, 3.12, 3.13 and 3.14.
+- **The `typing-extensions` runtime dependency is removed.** The package has no runtime dependencies. If you relied on it being installed transitively, add it to your own requirements.
+- The `toml` extra is now empty, because TOML support comes from the standard library (`tomllib`). `pip install "dataclass-args[toml]"` still works.
+
+### Changed (default behaviour; please read before upgrading)
+This release fixes many inconsistencies in how configuration sources are combined. Most of them lost data silently or crashed. Each change brings the code in line with the documented behaviour, or with what the CLI path already did.
+- **Dicts merge one level deep at every source boundary.** Previously, a dict value in a later `base_configs` entry or `--config` file **replaced** the earlier dict wholesale, which contradicted the README. Top-level keys now merge, as `--field file.json` already did. Nested dicts inside a key are still replaced; use the new `merge_strategy="deep"` to merge them too. Lists still replace, and `None` still clears.
+- **Caller data is never mutated or shared.** `base_configs` dicts and lists, the `build_config_from_dict` config dict and dataclass instances you pass in are copied when they enter the pipeline. Property overrides and appends used to write into your objects, and the built instance used to hold your dict.
+- **Property overrides edit the effective value.** `--mc key:value` and `items.+:x` now apply to the merged value, or to the dataclass default when no source set the field. Previously they started from `{}` and discarded non-empty defaults, nested base values and lists (`items.+` produced `{'+': x}`).
+- **Nested dict fields behave like top-level ones.** `--db-opts file.json` merges one level onto the configured value instead of replacing it. A non-file string passes through instead of raising.
+- **Dict-field file references are loaded when each layer enters the pipeline.** That includes the `--config` file and fields inside nested dataclasses. `base_configs={"db": "db.yaml"}` plus `--d port:5` used to crash, and file paths inside nested dataclasses were never loaded.
+- **Invalid values for `cli_nested` fields raise `ConfigurationError`.** A string or number given for a nested dataclass field used to be silently discarded, falling back to the defaults.
+- **A dataclass instance in a layer combines like its field dict.** A later dict layer used to wipe the instance's values back to class defaults. Values that `__post_init__` computes, or that `init=False` fields hold, are recomputed when the instance is rebuilt.
+- **An explicit `None` passed to `build_config_from_dict` clears the value.** It used to be silently ignored.
+- **Hyphenated field names (`db-host`) are accepted in every layer**, not just in `build_config_from_dict`. Keys inside dict-field values are never renamed. If one layer sets both spellings, that's an error.
+- **`cli_append` fields and optional positionals (`nargs="?"`/`"*"`) can be set from `base_configs` and `--config`.** The argparse default used to silently win.
+- **`build_config_from_dict` never exits the process.** A required positional field used to make it print usage and raise `SystemExit(2)`. It now behaves like any other required field: a missing value raises `ConfigurationError`.
+
+### Added
+- **Opt-in deep merge.** `merge_strategy="shallow"|"deep"` on `build_config`, `build_config_from_cli`, `build_config_from_dict` and `GenericConfigBuilder.build_config`. The public `deep_merge(base, override)` utility and the `MERGE_SHALLOW` / `MERGE_DEEP` constants are exported.
+- **Named layers:** `ConfigLayer(data, name=None, list_merge="replace"|"rules")`. It's accepted wherever `base_configs` accepts a path or a dict.
+- **Per-field list-merge rules:** the `cli_list_merge("append"|"append_unique", paths=None)` annotation. In `list_merge="rules"` layers, annotated list fields and dict paths append instead of replacing. `append_unique` de-duplicates by `==`, so unhashable elements work. Rules work at any nesting depth and on `cli_exclude` fields.
+- **`build_config_from_dict(..., config_list_merge="replace"|"rules")`.** In deep mode the config dict is a single layer named `config`.
+- **Provenance:** pass `return_provenance=True` (deep mode) to get `(instance, Provenance)`. `Provenance` provides `entries(path)`, `source(path)`, `paths()`, `changes()` (values a later layer discarded) and `explain()`. Also exported: `ProvenanceEntry`, `ProvenanceChange` and `MISSING_VALUE`.
+- **`cli_nested` works at any depth.** A nested dataclass inside a nested dataclass is flattened recursively (`--mid-inner-v`) and rebuilt as real instances. It used to be exposed as one string option, or left as a raw dict. Collision checks, short-option rules and property overrides apply at every level, and an annotation cycle is rejected when the builder is constructed.
+- **New examples:** `examples/deep_merge_example.py` and `examples/layered_config_example.py`.
+
+### Fixed
+- **Every option-name clash is now a clear `ConfigBuilderError`.** These used to crash with a raw `argparse.ArgumentError`:
+  - a one-letter dict field (`d: Dict`), whose override `--d` equals its own option;
+  - an override that equals another field's option (`mc` vs `model_config` → `--mc`);
+  - a field named like the config-file option (`config`);
+  - `cli_short('h')`, which clashes with `--help`.
+
+  The error names the option string and every claimant, and suggests the fix (`cli_override_name`, another short letter, or a different `base_config_name`).
+- For a boolean field with custom help, the negative flag's help read `Disable <help text>`, e.g. "Disable Enable debug mode". It now reads `Disable --debug`.
+- `examples/cli_append_example.py` crashed (it used `cli_short("h")`).
+- A `nargs="*"` positional with `cli_choices` exited with an error when no values were given.
+- `make examples`, and therefore `make check`, never ran: the target wasn't `.PHONY`, and its commands passed invalid boolean flags. `make lint`/`make format` pointed at a non-existent `dataclass_config/` directory. Examples now run through `scripts/run_examples.sh`, shared with CI.
+- Error messages for property overrides now name the offending field and its type. Dict-field load errors name the layer.
+
+### Development
+- All 16 example scripts now run in CI and `make examples` (several were never run, and one was broken).
+- Cognitive complexity ≤ 10 per function is now **enforced** (`flake8-cognitive-complexity` in pre-commit and `.flake8`). Eight functions that exceeded it were refactored without changing behaviour.
+- CI tests Python 3.11–3.14. Single-version jobs run on 3.12, and mypy checks against 3.11.
+
+### Documentation
+- README: corrected the "Merge Behavior by Type" table, which claimed dict merging that the code didn't do. Added sections on deep merge and layered configuration (layers, list rules, provenance), and documented that required positionals must be given on the command line.
+- API.md and AGENT_BOOTSTRAP.md updated for all new names and parameters. AGENT_BOOTSTRAP's module map and navigation guide had been stale since the 1.8.1 refactor and now match the code.
+- Fixed documentation defects:
+  - API.md documented `prog`/`epilog` options for `build_config_from_cli` that don't exist;
+  - API.md claimed `@file` loading doesn't work in `build_config_from_dict` (it does);
+  - `cli_override_name` was missing from API.md;
+  - an unclosed code fence in the README (`build_config_from_cli`) and one in API.md (`cli_resolve`) broke the rendering of every section after them;
+  - an orphaned, heading-less README snippet is restored as "Config Files, Dict Files and Property Overrides Together";
+  - stale pipeline stage numbers ("Stage 3.8") are corrected;
+  - the README's first Short Options example, and its web-server example, crashed (`cli_short('h')`, which `--help` owns);
+  - several samples weren't valid Python: a required field after a defaulted one, or `cli_file_loadable(cli_help(...))`, which isn't a supported call;
+  - two `--help` samples didn't match the real output;
+  - the "Type Support" dict example and the coverage figures were wrong;
+  - a duplicated "Development Setup" section and a broken COVERAGE.md link are fixed.
+
+### Tests
+- 1234 tests (up from 723), with 98.02% coverage, on every supported Python version.
+- Existing tests that were changed, because they asserted a defect being fixed or for formatting only:
+  - `test_cli_nested.py::…::test_nested_with_non_dict_non_dataclass_in_config` now expects `ConfigurationError` instead of the value being silently discarded;
+  - `test_nested_help_text.py::…::test_nested_dataclass_field_shows_parent_context` now expects the recursive flag `--l2-l3-value`;
+  - `test_file_loading.py` was reformatted by black for the py311 target;
+  - the `< 3.10` skip markers were removed from `test_pep604_union.py` and `test_instantiate.py`.
+
+
 ## [1.9.1] - 2026-09-08
 
 ### Added

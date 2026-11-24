@@ -2,13 +2,12 @@
 Value resolution: process raw values, validate ranges, apply cli_resolve.
 
 This module handles stages 5, 7, and part of 8 of the config resolution pipeline:
-    5. Resolve raw values (file loading for base_configs values)
+    5. Resolve raw values (@file loading for base_configs scalar values)
     7. Validate append ranges (min_args/max_args enforcement)
     8. Resolve fields (cli_resolve transformations)
 
 Responsibilities:
     - Process @file references in base_configs/config file values
-    - Load dict files for dict fields from base_configs
     - Validate append field min/max argument counts
     - Apply cli_resolve transformations
 """
@@ -25,7 +24,6 @@ from .annotations import (
 )
 from .exceptions import ConfigurationError
 from .file_loading import process_file_loadable_value
-from .utils import load_structured_file
 
 
 class ValueResolver:
@@ -33,7 +31,7 @@ class ValueResolver:
     Resolves raw values and applies field-level transformations.
 
     Handles:
-    - Raw value resolution: @file loading, dict file loading for base_configs
+    - Raw value resolution: @file loading for base_configs
     - Append validation: min/max args enforcement
     - cli_resolve application: Transform values via resolver functions
     """
@@ -55,9 +53,10 @@ class ValueResolver:
 
         Values from base_configs or config files may contain:
         - @file references (for cli_file_loadable string fields)
-        - File path strings (for dict-typed fields ending in .json/.yaml/.yml/.toml)
 
-        These need the same processing that CLI values get. We skip fields that
+        These need the same processing that CLI values get. Dict-field file
+        path strings are not handled here: they are loaded when each layer
+        enters the pipeline (see LayerNormalizer). We skip fields that
         already had a CLI value (those were processed in apply_cli_overrides).
 
         Args:
@@ -82,34 +81,11 @@ class ValueResolver:
                 continue
 
             # Process based on field type (same logic as CLI overrides)
-            if info["is_list"]:
-                pass  # Lists from base_configs are already lists, no processing needed
-            elif info["is_dict"]:
-                self._resolve_raw_dict_value(config, field_name, value)
-            else:
+            # Lists need no processing; dict-field file refs were loaded at layer intake
+            if not (info["is_list"] or info["is_dict"]):
                 self._resolve_raw_scalar_value(config, field_name, info, value)
 
         return config
-
-    def _resolve_raw_dict_value(
-        self, config: Dict[str, Any], field_name: str, value: Any
-    ) -> None:
-        """Resolve a raw dict field value from base_configs/config file."""
-        if isinstance(value, dict):
-            pass  # Already a dict, nothing to resolve
-        elif isinstance(value, str):
-            # Check if it looks like a file path
-            looks_like_file = any(
-                value.endswith(ext) for ext in [".json", ".yaml", ".yml", ".toml"]
-            )
-            if looks_like_file:
-                try:
-                    config[field_name] = load_structured_file(value)
-                except Exception as e:
-                    raise ConfigurationError(
-                        f"Failed to load dictionary config for field '{field_name}' "
-                        f"from {value}: {e}"
-                    ) from e
 
     def _resolve_raw_scalar_value(
         self, config: Dict[str, Any], field_name: str, info: Dict[str, Any], value: Any
@@ -224,13 +200,18 @@ class ValueResolver:
             resolver = get_cli_resolver(info)
             if resolver is None:
                 continue  # pragma: no cover - safety guard for mypy
-            try:
-                config_dict[field_name] = resolver(value)
-            except ConfigurationError:
-                raise  # Re-raise without wrapping
-            except Exception as e:
-                raise ConfigurationError(
-                    f"Failed to resolve field '{field_name}': {e}"
-                ) from e
+            config_dict[field_name] = self._apply_resolver(field_name, resolver, value)
 
         return config_dict
+
+    @staticmethod
+    def _apply_resolver(field_name: str, resolver: Any, value: Any) -> Any:
+        """Call a cli_resolve resolver, wrapping non-ConfigurationError failures."""
+        try:
+            return resolver(value)
+        except ConfigurationError:
+            raise  # Re-raise without wrapping
+        except Exception as e:
+            raise ConfigurationError(
+                f"Failed to resolve field '{field_name}': {e}"
+            ) from e

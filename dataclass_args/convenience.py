@@ -13,14 +13,60 @@ All functions return an instance of the provided dataclass type.
 """
 
 import argparse
+import dataclasses
 import sys
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union, overload
 
 from .builder import GenericConfigBuilder
+from .config_merging import (
+    LIST_MERGE_REPLACE,
+    LIST_MERGE_RULES,
+    BaseConfigInput,
+    ConfigLayer,
+)
+from .exceptions import ConfigBuilderError
 from .formatter import RangeAppendHelpFormatter
+from .layer_normalization import check_both_spellings
+from .merge_strategy import MERGE_DEEP, MergeContext, make_merge_context
+from .provenance import Provenance
+from .utils import copy_containers
 
-# Type alias for base_configs parameter
-BaseConfigInput = Union[str, Dict[str, Any], List[Union[str, Dict[str, Any]]]]
+
+@overload
+def build_config_from_cli(
+    config_class: Type,
+    args: Optional[List[str]] = ...,
+    base_config_name: str = ...,
+    base_configs: Optional[BaseConfigInput] = ...,
+    description: Optional[str] = ...,
+    merge_strategy: str = ...,
+    *,
+    return_provenance: Literal[True],
+) -> Tuple[Any, Provenance]: ...
+
+
+@overload
+def build_config_from_cli(
+    config_class: Type,
+    args: Optional[List[str]] = ...,
+    base_config_name: str = ...,
+    base_configs: Optional[BaseConfigInput] = ...,
+    description: Optional[str] = ...,
+    merge_strategy: str = ...,
+    return_provenance: Literal[False] = ...,
+) -> Any: ...
+
+
+@overload
+def build_config_from_cli(
+    config_class: Type,
+    args: Optional[List[str]] = ...,
+    base_config_name: str = ...,
+    base_configs: Optional[BaseConfigInput] = ...,
+    description: Optional[str] = ...,
+    merge_strategy: str = ...,
+    return_provenance: bool = ...,
+) -> Any: ...
 
 
 def build_config_from_cli(
@@ -29,6 +75,8 @@ def build_config_from_cli(
     base_config_name: str = "config",
     base_configs: Optional[BaseConfigInput] = None,
     description: Optional[str] = None,
+    merge_strategy: str = "shallow",
+    return_provenance: bool = False,
 ) -> Any:
     """
     Build dataclass instance from CLI arguments with optional base configs.
@@ -48,9 +96,17 @@ def build_config_from_cli(
                      - List[Union[str, dict]]: Multiple configs applied in order
         description: Optional description for ArgumentParser help text.
                     If not provided, uses "Build {ClassName} from CLI"
+        merge_strategy: How dicts from different sources are merged:
+                       "shallow" (default, one level) or "deep" (recursive)
+        return_provenance: If True (requires merge_strategy="deep"), return
+                          ``(instance, Provenance)`` instead of the instance
 
     Returns:
-        Instance of config_class built from merged configurations
+        Instance of config_class built from merged configurations, or
+        ``(instance, Provenance)`` when return_provenance=True
+
+    Raises:
+        ConfigBuilderError: If merge_strategy is not 'shallow' or 'deep'
 
     Example:
         # Single file
@@ -92,7 +148,43 @@ def build_config_from_cli(
     builder.add_arguments(parser, base_config_name)
 
     parsed_args = parser.parse_args(args)
-    return builder.build_config(parsed_args, base_config_name, base_configs)
+    return builder.build_config(
+        parsed_args, base_config_name, base_configs, merge_strategy, return_provenance
+    )
+
+
+@overload
+def build_config(
+    config_class: Type,
+    args: Optional[List[str]] = ...,
+    base_configs: Optional[BaseConfigInput] = ...,
+    description: Optional[str] = ...,
+    merge_strategy: str = ...,
+    *,
+    return_provenance: Literal[True],
+) -> Tuple[Any, Provenance]: ...
+
+
+@overload
+def build_config(
+    config_class: Type,
+    args: Optional[List[str]] = ...,
+    base_configs: Optional[BaseConfigInput] = ...,
+    description: Optional[str] = ...,
+    merge_strategy: str = ...,
+    return_provenance: Literal[False] = ...,
+) -> Any: ...
+
+
+@overload
+def build_config(
+    config_class: Type,
+    args: Optional[List[str]] = ...,
+    base_configs: Optional[BaseConfigInput] = ...,
+    description: Optional[str] = ...,
+    merge_strategy: str = ...,
+    return_provenance: bool = ...,
+) -> Any: ...
 
 
 def build_config(
@@ -100,6 +192,8 @@ def build_config(
     args: Optional[List[str]] = None,
     base_configs: Optional[BaseConfigInput] = None,
     description: Optional[str] = None,
+    merge_strategy: str = "shallow",
+    return_provenance: bool = False,
 ) -> Any:
     """
     Simplified convenience function to build dataclass from CLI arguments.
@@ -118,9 +212,17 @@ def build_config(
                      - List[Union[str, dict]]: Multiple configs applied in order
         description: Optional description for ArgumentParser help text.
                     If not provided, uses "Build {ClassName} from CLI"
+        merge_strategy: How dicts from different sources are merged:
+                       "shallow" (default, one level) or "deep" (recursive)
+        return_provenance: If True (requires merge_strategy="deep"), return
+                          ``(instance, Provenance)`` instead of the instance
 
     Returns:
-        Instance of config_class built from merged configurations
+        Instance of config_class built from merged configurations, or
+        ``(instance, Provenance)`` when return_provenance=True
+
+    Raises:
+        ConfigBuilderError: If merge_strategy is not 'shallow' or 'deep'
 
     Example:
         # Simple usage
@@ -146,15 +248,162 @@ def build_config(
         )
     """
     return build_config_from_cli(
-        config_class, args, base_configs=base_configs, description=description
+        config_class,
+        args,
+        base_configs=base_configs,
+        description=description,
+        merge_strategy=merge_strategy,
+        return_provenance=return_provenance,
     )
+
+
+def _route_config_values(
+    builder: GenericConfigBuilder, config: dict
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Split a build_config_from_dict config into base-layer values and CLI values.
+
+    Returns:
+        Tuple of (values routed through the internal base_configs layer,
+        values injected into the argparse Namespace)
+    """
+    base_config_values: Dict[str, Any] = {}
+    cli_values: Dict[str, Any] = {}
+    for key, raw_value in config.items():
+        value = copy_containers(raw_value)
+        arg_key = key.replace("-", "_")
+        field_info = builder._config_fields.get(key) or builder._config_fields.get(
+            arg_key
+        )
+
+        if field_info is None:
+            # Field not in config_fields (e.g., cli_exclude) - route through base_configs
+            base_config_values[key] = value
+        elif field_info.get("is_nested_dataclass"):
+            # Nested field - route through base_configs, where the layer
+            # normalizer validates it and stage 6 reconstructs it
+            base_config_values[key] = value
+        elif value is None:
+            # Explicit None clears the value: argparse treats None as "not
+            # provided", so route it through the layer that wins over base_configs
+            base_config_values[arg_key] = None
+        else:
+            # Regular field - process through CLI pipeline
+            cli_values[arg_key] = value
+    return base_config_values, cli_values
+
+
+def _combine_base_configs(
+    base_configs: Optional[BaseConfigInput],
+    base_config_values: Union[Dict[str, Any], ConfigLayer, None],
+) -> Optional[List[Union[str, Dict[str, Any], ConfigLayer]]]:
+    """Put user-supplied base_configs first, then the internally-routed layer."""
+    combined: List[Union[str, Dict[str, Any], ConfigLayer]] = []
+
+    # Add user-supplied base_configs first (lowest precedence)
+    if base_configs is not None:
+        if isinstance(base_configs, list):
+            combined.extend(base_configs)
+        else:
+            combined.append(base_configs)
+
+    # Add internally-routed nested/excluded values on top
+    if base_config_values:
+        combined.append(base_config_values)
+
+    return combined if combined else None
+
+
+def _empty_namespace(parser: argparse.ArgumentParser) -> argparse.Namespace:
+    """
+    Build a Namespace holding "no CLI value" (None) for every argument.
+
+    The programmatic API must never run argparse's required-argument check or
+    exit, so the parser is only used to learn the argument names.
+    """
+    return argparse.Namespace(
+        **{action.dest: None for action in parser._actions if action.dest != "help"}
+    )
+
+
+def _validate_config_list_merge(config_list_merge: Any, ctx: MergeContext) -> None:
+    """Validate config_list_merge and its compatibility with the merge strategy."""
+    if config_list_merge not in (LIST_MERGE_REPLACE, LIST_MERGE_RULES):
+        raise ConfigBuilderError(
+            f"config_list_merge must be 'replace' or 'rules', got {config_list_merge!r}"
+        )
+    if config_list_merge == LIST_MERGE_RULES and ctx.strategy != MERGE_DEEP:
+        raise ConfigBuilderError(
+            "config_list_merge='rules' requires merge_strategy='deep'"
+        )
+
+
+def _validate_provenance(return_provenance: bool, ctx: MergeContext) -> None:
+    """Provenance needs layered mode (merge_strategy='deep')."""
+    if return_provenance and ctx.strategy != MERGE_DEEP:
+        raise ConfigBuilderError(
+            "return_provenance=True requires merge_strategy='deep'"
+        )
+
+
+def _inject_config_values(
+    builder: GenericConfigBuilder, args: argparse.Namespace, config: dict
+) -> Optional[Dict[str, Any]]:
+    """
+    Legacy (shallow) route: inject regular fields into the Namespace.
+
+    Returns:
+        The values routed through an internal base layer (nested/excluded
+        fields and explicit None), or None if there are none
+    """
+    base_config_values, cli_values = _route_config_values(builder, config)
+    for key, value in cli_values.items():
+        setattr(args, key, value)
+    return base_config_values or None
+
+
+@overload
+def build_config_from_dict(
+    config_class: type,
+    config: dict,
+    base_configs: Optional[BaseConfigInput] = ...,
+    config_list_merge: str = ...,
+    merge_strategy: str = ...,
+    *,
+    return_provenance: Literal[True],
+) -> Tuple[Any, Provenance]: ...
+
+
+@overload
+def build_config_from_dict(
+    config_class: type,
+    config: dict,
+    base_configs: Optional[BaseConfigInput] = ...,
+    config_list_merge: str = ...,
+    merge_strategy: str = ...,
+    return_provenance: Literal[False] = ...,
+) -> Any: ...
+
+
+@overload
+def build_config_from_dict(
+    config_class: type,
+    config: dict,
+    base_configs: Optional[BaseConfigInput] = ...,
+    config_list_merge: str = ...,
+    merge_strategy: str = ...,
+    return_provenance: bool = ...,
+) -> Any: ...
 
 
 def build_config_from_dict(
     config_class: type,
     config: dict,
     base_configs: Optional[BaseConfigInput] = None,
-):
+    config_list_merge: str = LIST_MERGE_REPLACE,
+    merge_strategy: str = "shallow",
+    return_provenance: bool = False,
+) -> Any:
     """
     Build a dataclass instance from a dictionary, processing values as CLI values.
 
@@ -179,11 +428,25 @@ def build_config_from_dict(
                      - str: Path to a single config file
                      - dict: A single configuration dictionary
                      - List[Union[str, dict]]: Multiple configs applied in order
+        config_list_merge: List policy of the `config` dict when
+                          merge_strategy="deep": "replace" (default) or "rules"
+                          (lists at cli_list_merge locations are combined with
+                          earlier layers). "rules" requires merge_strategy="deep".
+        merge_strategy: How dicts from different sources are merged:
+                       "shallow" (default, one level) or "deep" (recursive).
+                       In deep mode the whole `config` dict is applied as the
+                       last base layer (named "config") instead of being
+                       processed as CLI values.
+        return_provenance: If True (requires merge_strategy="deep"), return
+                          ``(instance, Provenance)`` instead of the instance
 
     Returns:
-        Instance of config_class with all values resolved
+        Instance of config_class with all values resolved, or
+        ``(instance, Provenance)`` when return_provenance=True
 
     Raises:
+        ConfigBuilderError: If merge_strategy or config_list_merge is invalid, or
+            config_list_merge="rules" is combined with merge_strategy="shallow"
         ConfigurationError: If resolution fails
         TypeError: If config is not a dict
 
@@ -208,6 +471,11 @@ def build_config_from_dict(
             base_configs=['base.yaml', {'model': 'fallback'}],
         )
     """
+    # Validate the knobs before doing any work
+    ctx = make_merge_context(merge_strategy)
+    _validate_config_list_merge(config_list_merge, ctx)
+    _validate_provenance(return_provenance, ctx)
+
     if not isinstance(config, dict):
         raise TypeError(
             f"build_config_from_dict requires a dict, got {type(config).__name__}. "
@@ -219,47 +487,27 @@ def build_config_from_dict(
     parser = argparse.ArgumentParser()
     builder.add_arguments(parser)
 
-    # Parse empty args to get a Namespace with argparse defaults/SUPPRESS
-    args = parser.parse_args([])
+    # A Namespace with no CLI values (never parsed, so argparse can't exit)
+    args = _empty_namespace(parser)
 
-    # Separate nested dict fields and excluded fields from CLI-processable fields
-    base_config_values = {}
-    cli_values = {}
-    for key, value in config.items():
-        arg_key = key.replace("-", "_")
-        field_info = builder._config_fields.get(key) or builder._config_fields.get(
-            arg_key
+    field_names = frozenset(f.name for f in dataclasses.fields(config_class))
+    check_both_spellings(config, field_names, "config")
+
+    if ctx.strategy == MERGE_DEEP:
+        # Layered mode: no CLI injection; `config` is one real layer, applied last
+        config_layer: Union[Dict[str, Any], ConfigLayer, None] = ConfigLayer(
+            copy_containers(config), name="config", list_merge=config_list_merge
         )
+    else:
+        config_layer = _inject_config_values(builder, args, config)
 
-        if field_info is None:
-            # Field not in config_fields (e.g., cli_exclude) - route through base_configs
-            base_config_values[key] = value
-        elif field_info.get("is_nested_dataclass") and isinstance(value, dict):
-            # Nested dict - route through base_configs for reconstruction
-            base_config_values[key] = value
-        else:
-            # Regular field - process through CLI pipeline
-            cli_values[arg_key] = value
-
-    # Inject CLI-processable values into Namespace
-    for key, value in cli_values.items():
-        setattr(args, key, value)
-
-    # Combine user-supplied base_configs with internally-routed values.
-    # Precedence: base_configs (lowest) < base_config_values < config dict (highest, via Namespace)
-    combined_base_configs: List[Union[str, Dict[str, Any]]] = []
-
-    # Add user-supplied base_configs first (lowest precedence)
-    if base_configs is not None:
-        if isinstance(base_configs, list):
-            combined_base_configs.extend(base_configs)
-        else:
-            combined_base_configs.append(base_configs)
-
-    # Add internally-routed nested/excluded values on top
-    if base_config_values:
-        combined_base_configs.append(base_config_values)
+    # Combine user-supplied base_configs with the config layer.
+    # Precedence: base_configs (lowest) < config dict (highest)
+    combined_base_configs = _combine_base_configs(base_configs, config_layer)
 
     return builder.build_config(
-        args, base_configs=combined_base_configs if combined_base_configs else None
+        args,
+        base_configs=combined_base_configs,
+        merge_strategy=merge_strategy,
+        return_provenance=return_provenance,
     )

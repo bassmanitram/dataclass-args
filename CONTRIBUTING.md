@@ -71,7 +71,7 @@ This project adheres to a standard code of conduct. By participating, you are ex
 
 ### Code Style
 
-- **Python Version**: Support Python 3.8+
+- **Python Version**: Support all non-EOL Python versions (currently 3.11+; tested on 3.11–3.14)
 - **Formatting**: Use Black with line length 88
 - **Import Sorting**: Use isort with Black profile
 - **Type Hints**: Use type hints for all public APIs

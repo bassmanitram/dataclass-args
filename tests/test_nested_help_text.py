@@ -123,7 +123,7 @@ class TestNestedHelpText:
         assert "--cache-port" in help_text
 
     def test_nested_dataclass_field_shows_parent_context(self):
-        """Nested dataclass fields (not fully flattened) show parent context."""
+        """Doubly nested dataclass fields are recursively flattened and show the dotted path (NN3)."""
 
         @dataclass
         class Level3:
@@ -143,9 +143,9 @@ class TestNestedHelpText:
 
         help_text = parser.format_help()
 
-        # Level2.level3 is not fully flattened (requires recursive flattening)
-        # So it shows as level2.level3
-        assert "level2.level3" in help_text
+        # Level3.value is flattened through both levels, with the composed prefix
+        assert "--l2-l3-value" in help_text
+        assert "level2.level3.value" in help_text
 
-        # CLI name has the l2 prefix
-        assert "--l2-level3" in help_text
+        # The old single string option for the nested dataclass is gone
+        assert "--l2-level3 " not in help_text and "--l2-level3\n" not in help_text

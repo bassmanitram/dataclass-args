@@ -2,45 +2,49 @@
 
 ## Overview
 
-This project maintains **97.58%** code coverage with comprehensive testing and branch coverage enabled.
+This project maintains **98.02%** code coverage with comprehensive testing and branch coverage enabled.
 
-## Current Coverage Statistics (v1.9.0)
+## Current Coverage Statistics (v1.10.0)
 
 | Module | Statements | Missing | Branches | Partial | Coverage |
 |--------|------------|---------|----------|---------|----------|
-| `__init__.py` | 8 | 0 | 0 | 0 | **100.00%** |
-| `annotations.py` | 166 | 0 | 46 | 0 | **100.00%** |
+| `__init__.py` | 10 | 0 | 0 | 0 | **100.00%** |
+| `annotations.py` | 186 | 0 | 48 | 0 | **100.00%** |
 | `append_action.py` | 6 | 0 | 0 | 0 | **100.00%** |
-| `argument_registry.py` | 201 | 1 | 78 | 5 | **97.85%** |
-| `builder.py` | 33 | 0 | 4 | 0 | **100.00%** |
-| `cli_overrides.py` | 74 | 2 | 30 | 1 | **97.12%** |
-| `config_applicator.py` | 74 | 1 | 32 | 1 | **98.11%** |
-| `config_merging.py` | 41 | 1 | 16 | 1 | **96.49%** |
-| `config_resolver.py` | 33 | 0 | 0 | 0 | **100.00%** |
-| `convenience.py` | 44 | 0 | 18 | 0 | **100.00%** |
+| `argument_registry.py` | 202 | 1 | 72 | 2 | **98.91%** |
+| `builder.py` | 42 | 0 | 10 | 3 | **94.23%** |
+| `cli_overrides.py` | 89 | 0 | 30 | 0 | **100.00%** |
+| `config_applicator.py` | 102 | 0 | 44 | 0 | **100.00%** |
+| `config_merging.py` | 64 | 1 | 20 | 1 | **97.62%** |
+| `config_resolver.py` | 64 | 0 | 10 | 0 | **100.00%** |
+| `convenience.py` | 97 | 0 | 46 | 9 | **93.71%** |
 | `exceptions.py` | 8 | 0 | 0 | 0 | **100.00%** |
-| `field_analyzer.py` | 189 | 11 | 84 | 5 | **93.41%** |
+| `field_analyzer.py` | 264 | 12 | 120 | 5 | **95.05%** |
 | `file_loading.py` | 40 | 0 | 16 | 0 | **100.00%** |
 | `formatter.py` | 9 | 0 | 4 | 0 | **100.00%** |
-| `instantiate.py` | 185 | 0 | 72 | 0 | **100.00%** |
-| `nested_processor.py` | 111 | 3 | 46 | 1 | **97.45%** |
-| `type_inspector.py` | 73 | 3 | 32 | 3 | **94.29%** |
-| `utils.py` | 63 | 0 | 22 | 0 | **100.00%** |
-| `value_resolution.py` | 83 | 5 | 42 | 2 | **94.40%** |
-| **TOTAL** | **1416** | **26** | **526** | **18** | **97.58%** |
+| `instantiate.py` | 174 | 0 | 66 | 0 | **100.00%** |
+| `layer_normalization.py` | 75 | 0 | 26 | 0 | **100.00%** |
+| `merge_strategy.py` | 50 | 0 | 24 | 0 | **100.00%** |
+| `nested_processor.py` | 185 | 3 | 76 | 2 | **98.08%** |
+| `option_collisions.py` | 88 | 3 | 46 | 4 | **94.78%** |
+| `provenance.py` | 202 | 2 | 64 | 2 | **98.50%** |
+| `type_inspector.py` | 64 | 1 | 30 | 3 | **95.74%** |
+| `utils.py` | 108 | 0 | 40 | 0 | **100.00%** |
+| `value_resolution.py` | 72 | 3 | 34 | 1 | **96.23%** |
+| **TOTAL** | **2201** | **26** | **826** | **32** | **98.02%** |
 
 ## Test Suite
 
-- **Total Tests:** 723
-- **Test Execution Time:** ~3.5s
+- **Total Tests:** 1234
+- **Test Execution Time:** ~10s
 - **All Tests Passing:** ✅
-- **Python Version:** 3.8+ (tested on 3.8–3.12)
+- **Python Version:** 3.11+ (tested on 3.11–3.14)
 
 ## Coverage Requirements
 
 - **Minimum Required:** 88%
-- **Current Coverage:** 97.58% ✅
-- **Modules at 100%:** 11 of 19
+- **Current Coverage:** 98.02% ✅
+- **Modules at 100%:** 13 of 23
 
 ## Coverage History
 
@@ -52,25 +56,30 @@ This project maintains **97.58%** code coverage with comprehensive testing and b
 | v1.7.0 | 660 | 98.76% | +27 tests (build_config_from_dict) |
 | v1.8.1 | 675 | 97.74% | +15 tests, major refactor |
 | v1.9.0 | 723 | 97.58% | +48 tests (cli_override_name, list overrides) |
+| v1.10.0 | 1234 | 98.02% | +511 tests (defect fixes, deep merge, layers, list rules, provenance, nesting at any depth) |
 
-## Architecture (v1.9.0)
+## Architecture (v1.10.0)
 
 ```
 dataclass_args/
-├── builder.py              # Orchestrator: ties FieldAnalyzer + ArgumentRegistry + ConfigResolver
-├── field_analyzer.py       # Phase 1: Field inspection, validation, collision detection
-├── argument_registry.py    # Phase 2: argparse argument registration
-├── config_resolver.py      # Phase 3: Pipeline orchestrator (delegates to stage modules)
-│   ├── config_merging.py   # Stages 1-2: Normalize & merge base_configs + config files
-│   ├── cli_overrides.py    # Stage 3: Apply CLI argument overrides
-│   └── value_resolution.py # Stages 4-7: File resolution, validation, cli_resolve
-├── convenience.py          # Public entry points (build_config, build_config_from_dict)
-├── annotations.py          # Field metadata annotations (cli_short, cli_nested, etc.)
-├── config_applicator.py    # Dict merge utilities
-├── nested_processor.py     # Nested dataclass flattening/reconstruction
+├── convenience.py          # Public entry points (build_config, build_config_from_cli, build_config_from_dict)
+├── builder.py              # Orchestrator: FieldAnalyzer + ArgumentRegistry + ConfigResolver
+├── field_analyzer.py       # Field inspection, validation, collisions, cycle guard, list-rule map
+├── argument_registry.py    # argparse argument registration
+├── config_resolver.py      # Pipeline orchestrator (stages 1-9)
+│   ├── config_merging.py       # ConfigLayer, base_configs normalisation, layer stacking
+│   ├── layer_normalization.py  # Per-layer intake: keys, dict-field file refs, nested instances
+│   ├── merge_strategy.py       # shallow/deep, MergeContext, list-merge rules
+│   ├── cli_overrides.py        # Stage 4: CLI argument overrides
+│   ├── nested_processor.py     # Stage 6: nested dataclasses at any depth
+│   └── value_resolution.py     # Stages 5, 7, 8: @file, append ranges, cli_resolve
+├── provenance.py           # Provenance recorder and query API
+├── option_collisions.py    # Plans every option string and rejects clashes before registration
+├── config_applicator.py    # One-level merge, --config file, property overrides
+├── annotations.py          # Field metadata annotations (cli_short, cli_nested, cli_list_merge, ...)
 ├── type_inspector.py       # Type system utilities
 ├── file_loading.py         # @file syntax processing
-├── utils.py                # Structured file loading (JSON/YAML/TOML)
+├── utils.py                # Structured file loading, deep_merge, copy_containers
 ├── instantiate.py          # Object instantiation from config
 ├── formatter.py            # Help text formatting
 ├── append_action.py        # Custom argparse append action
@@ -126,7 +135,7 @@ tests/
 
 ## Quality Metrics
 
-- **Test Execution:** Fast (~3.5s for 723 tests)
+- **Test Execution:** Fast (~10s for 1234 tests)
 - **Test Reliability:** 100% (no flaky tests)
 - **Cognitive Complexity:** All functions CC≤10
 - **Test Clarity:** High (class-based organization, one class per concern)
@@ -139,10 +148,10 @@ tests/
 All tests run automatically on:
 - Every push
 - Every pull request
-- Multiple Python versions (3.8, 3.9, 3.10, 3.11, 3.12)
+- Multiple Python versions (3.11, 3.12, 3.13, 3.14)
 - Multiple platforms (Linux, macOS, Windows)
 
 ---
 
-**Last Updated:** 2026-09-06
-**Version:** 1.9.0
+**Last Updated:** 2026-11-24
+**Version:** 1.10.0

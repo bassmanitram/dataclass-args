@@ -7,14 +7,7 @@ as Optional types by TypeInspector and work end-to-end with build_config().
 All tests in this file require Python 3.10+ and are skipped on older versions.
 """
 
-import sys
-
 import pytest
-
-# Skip entire module on Python < 3.10
-pytestmark = pytest.mark.skipif(
-    sys.version_info < (3, 10), reason="PEP 604 union syntax requires Python 3.10+"
-)
 
 
 class TestTypeInspectorPEP604:

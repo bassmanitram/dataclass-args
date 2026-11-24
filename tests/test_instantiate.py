@@ -5,7 +5,6 @@ Tests cover all dispatch rules, error paths, recursive resolution,
 attribute traversal, custom keys, and edge cases.
 """
 
-import sys
 from typing import Optional
 
 import pytest
@@ -1029,10 +1028,6 @@ class TestInstantiateUnwrapPaths:
         # Not instantiable (it's a Union, not a class)
         assert _is_instantiable_type(multi_union) is False
 
-    @pytest.mark.skipif(
-        sys.version_info < (3, 10),
-        reason="PEP 604 syntax requires Python 3.10+",
-    )
     def test_unwrap_optional_pep604_multi_type(self):
         """PEP 604 multi-type union (int | str | None) returned unchanged."""
         from dataclass_args.instantiate import _unwrap_optional
@@ -1115,10 +1110,6 @@ class TestAnnotationGuidedStringResolution:
 class TestPep604UnionUnwrap:
     """PEP 604 union type (T | None) unwrapping in recursive resolution."""
 
-    @pytest.mark.skipif(
-        sys.version_info < (3, 10),
-        reason="PEP 604 syntax requires Python 3.10+",
-    )
     def test_pep604_union_unwrap_in_resolution(self):
         """Optional via PEP 604 (T | None) is correctly unwrapped during resolution."""
         # Define a class with PEP 604 annotation using exec to avoid syntax error on < 3.10

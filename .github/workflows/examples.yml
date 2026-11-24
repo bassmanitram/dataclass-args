@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.10", "3.12"]
+        python-version: ["3.11", "3.12", "3.14"]
 
     steps:
     - uses: actions/checkout@v7
@@ -32,57 +32,5 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[all]"
 
-    - name: Test basic example
-      run: |
-        cd examples
-        python basic_example.py --name "TestApp" --count 3 --debug
-
-    - name: Test advanced example
-      run: |
-        cd examples
-        python advanced_example.py --name "TestServer" --debug
-
-    - name: Test advanced example with file loading
-      run: |
-        cd examples
-        python advanced_example.py --name "FileServer" --system-prompt "@prompts/server_prompt.txt"
-
-    - name: Test advanced example with config file
-      run: |
-        cd examples
-        python advanced_example.py --config server_config.yaml --name "ConfigServer"
-
-    - name: Test cli_short example
-      run: |
-        cd examples
-        python cli_short_example.py -n "TestApp" -p 9000 --workers 4 -d
-
-    - name: Test cli_choices example
-      run: |
-        cd examples
-        python cli_choices_example.py -n "TestDeploy" -e prod -r us-west-2
-
-    - name: Test boolean_flags example
-      run: |
-        cd examples
-        python boolean_flags_example.py -p "TestBuild" --no-test -d
-
-    - name: Test all_features example
-      run: |
-        cd examples
-        python all_features_example.py -n "TestApp" -e staging -r us-east-1 -d
-
-    - name: Test programmatic example (no CLI args)
-      run: |
-        cd examples
-        python programmatic_example.py
-
-    - name: Test help output for all examples
-      run: |
-        cd examples
-        python basic_example.py --help
-        python advanced_example.py --help
-        python cli_short_example.py --help
-        python cli_choices_example.py --help
-        python boolean_flags_example.py --help
-        python all_features_example.py --help
+    - name: Run examples
+      run: ./scripts/run_examples.sh

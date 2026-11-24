@@ -1,4 +1,4 @@
-.PHONY: install test lint format clean build publish dev-install help coverage
+.PHONY: help install dev-install test coverage coverage-html lint format clean build publish examples pre-commit setup check
 
 # Default target
 help:
@@ -40,15 +40,15 @@ coverage-html:
 
 # Run linting
 lint:
-	black --check dataclass_config/ tests/ examples/
-	isort --check-only dataclass_config/ tests/ examples/
-	mypy dataclass_config/
-	flake8 dataclass_config/
+	black --check dataclass_args/ tests/ examples/
+	isort --check-only dataclass_args/ tests/ examples/
+	mypy dataclass_args/
+	flake8 dataclass_args/
 
 # Format code
 format:
-	black dataclass_config/ tests/ examples/
-	isort dataclass_config/ tests/ examples/
+	black dataclass_args/ tests/ examples/
+	isort dataclass_args/ tests/ examples/
 
 # Clean build artifacts
 clean:
@@ -73,8 +73,7 @@ publish: build
 
 # Run examples
 examples:
-	cd examples && python basic_example.py --name "MakeTest" --count 2 --debug true
-	cd examples && python advanced_example.py --name "MakeTestServer" --debug false
+	./scripts/run_examples.sh
 
 # Install and run pre-commit hooks
 pre-commit:

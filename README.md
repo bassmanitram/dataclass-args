@@ -6,7 +6,7 @@ Generate command-line interfaces from Python dataclasses.
 [![Lint](https://github.com/bassmanitram/dataclass-args/actions/workflows/lint.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/lint.yml)
 [![Code Quality](https://github.com/bassmanitram/dataclass-args/actions/workflows/quality.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/quality.yml)
 [![Examples](https://github.com/bassmanitram/dataclass-args/actions/workflows/examples.yml/badge.svg)](https://github.com/bassmanitram/dataclass-args/actions/workflows/examples.yml)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://img.shields.io/pypi/v/dataclass-args.svg)](https://pypi.org/project/dataclass-args/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -22,23 +22,25 @@ Generate command-line interfaces from Python dataclasses.
 - **[Repeatable Options](#repeatable-options)** - Allow options to be specified multiple times with `cli_append()`
 - **[File Loading](#file-loadable-parameters)** - Load parameters from files using `@filename` syntax
 - **[Config Merging](#configuration-merging)** - Combine configuration sources with hierarchical overrides
+- **[Deep Merge](#deep-merge)** - Opt-in recursive dict merging with `merge_strategy="deep"`
+- **[Layered Configuration](#layered-configuration)** - Named layers, per-field list-merge rules (`cli_list_merge()`) and provenance (which layer set what)
 - **[Property Overrides](#dict-field-property-overrides)** - Set individual dict properties with `--mc key:value` and list indexing
 - **[Flexible Types](#type-support)** - Support for `List`, `Dict`, `Optional`, and custom types
 - **[Field Resolution](#field-resolution)** - Transform config dicts into typed objects with `cli_resolve()`
 - **[Object Instantiation](#object-instantiation)** - Construct objects from config using `instantiate()`
 - **[Rich Annotations](#combining-annotations)** - Custom help text, exclusions, and combinations
 - **[Programmatic Usage](#programmatic-usage)** - Build configs from dicts without CLI via `build_config_from_dict()`
-- **[Minimal Dependencies](#installation)** - Lightweight with optional format support
+- **[Zero Dependencies](#installation)** - No runtime dependencies; optional YAML support
 ## Quick Start
 
 ### Installation
 
 ```bash
-pip install dataclass-args
+pip install dataclass-args              # requires Python 3.11+
 
 # With optional format support
-pip install "dataclass-args[yaml,toml]"  # YAML and TOML config files
-pip install "dataclass-args[all]"        # All optional dependencies
+pip install "dataclass-args[yaml]"      # YAML config files (JSON and TOML are built in)
+pip install "dataclass-args[all]"       # All optional dependencies
 ```
 
 ### Basic Usage
@@ -89,21 +91,23 @@ from dataclass_args import cli_short
 
 @dataclass
 class ServerConfig:
-    host: str = cli_short('h', default="localhost")
+    host: str = cli_short('H', default="localhost")
     port: int = cli_short('p', default=8000)
     debug: bool = cli_short('d', default=False)
 ```
 
 ```bash
 # Use short forms
-$ python server.py -h 0.0.0.0 -p 9000 -d
+$ python server.py -H 0.0.0.0 -p 9000 -d
 
 # Or long forms
 $ python server.py --host 0.0.0.0 --port 9000 --debug
 
 # Mix and match
-$ python server.py -h 0.0.0.0 --port 9000 -d
+$ python server.py -H 0.0.0.0 --port 9000 -d
 ```
+
+`-h` is reserved for `--help`. Every option name is checked when the builder is constructed: short options, long options, `--no-` flags, dict override options and the `--config` option. Any clash raises `ConfigBuilderError`, naming the clashing fields and suggesting a fix.
 
 ### Boolean Flags
 
@@ -367,6 +371,12 @@ class Invalid:
 
 **Why?** Positional lists are greedy and consume all remaining values. The parser can't determine where one positional list ends and another begins without `--` flags.
 
+#### Positional Values from Config Sources
+
+- **Required positionals** (`nargs` of `None`, `'+'` or an integer) are part of the command-line contract. They must be given on the command line, and a value in `base_configs` or `--config` can't satisfy them.
+- **Optional positionals** (`nargs='?'` or `'*'`) behave like any other field. A config source can set them, and the command line overrides it.
+- In `build_config_from_dict` there is no command line, so every positional, required or not, comes from the config dict.
+
 ### Combining Annotations
 
 Use `combine_annotations()` to merge multiple features:
@@ -405,12 +415,16 @@ $ python app.py -n myapp -e prod -d
 # Clear help output
 $ python app.py --help
 options:
+  -h, --help            show this help message and exit
+  --config CONFIG       Base configuration file (JSON, YAML, or TOML)
   -n NAME, --name NAME  Application name
   -e {dev,staging,prod}, --environment {dev,staging,prod}
-                        Deployment environment (default: dev)
+                        Deployment environment (choices: dev, staging, prod)
   -d, --debug           Enable debug mode (default: False)
-  --no-debug            Disable Enable debug mode
+  --no-debug            Disable --debug
 ```
+
+(Python 3.13+ prints short options without the metavar repeated: `-n, --name NAME`.)
 
 ### Real-World Example
 
@@ -502,9 +516,9 @@ from dataclass_args import cli_file_loadable
 
 @dataclass
 class AppConfig:
-    name: str = cli_help("Application name")
+    name: str = cli_help("Application name", default="app")
     system_prompt: str = cli_file_loadable(default="You are a helpful assistant")
-    welcome_message: str = cli_file_loadable()
+    welcome_message: str = cli_file_loadable(default="Welcome!")
 
 config = build_config(AppConfig)
 ```
@@ -538,6 +552,8 @@ $ python app.py --name "MyApp" --system-prompt "@~/prompts/assistant.txt"
 ### Nested Dataclasses
 
 Organize complex configurations into nested dataclasses with automatic CLI flattening. Use `cli_nested()` to create hierarchical configs that are exposed as flat CLI arguments with customizable prefixes.
+
+Nesting works at any depth. A `cli_nested` dataclass inside another one is flattened recursively, combining the prefixes from each level (`--mid-inner-v`), and is rebuilt as real dataclass instances.
 
 ```python
 from dataclass_args import cli_nested
@@ -582,15 +598,23 @@ $ python app.py \
 # Help shows all flattened fields
 $ python app.py --help
 options:
-  --app-name APP_NAME
-  --debug / --no-debug
-  --db-host DB_HOST
-  --db-port DB_PORT
+  -h, --help            show this help message and exit
+  --config CONFIG       Base configuration file (JSON, YAML, or TOML)
+  --app-name APP_NAME   app_name
+  --debug               debug (default: False)
+  --no-debug            Disable debug
+  --db-host DB_HOST     database.host
+  --db-port DB_PORT     database.port
   --db-username DB_USERNAME
+                        database.username
   --db-password DB_PASSWORD
+                        database.password
   --cache-host CACHE_HOST
+                        cache.host
   --cache-port CACHE_PORT
+                        cache.port
   --cache-ttl CACHE_TTL
+                        cache.ttl
 ```
 
 #### Prefix Modes
@@ -621,14 +645,14 @@ Short options behave differently based on the prefix:
 ```python
 @dataclass
 class ServerConfig:
-    host: str = cli_short("h", default="localhost")
+    host: str = cli_short("H", default="localhost")
     port: int = cli_short("p", default=8080)
 
 @dataclass
 class Config:
     server: ServerConfig = cli_nested(prefix="srv", default_factory=ServerConfig)
 
-# CLI: --srv-host, --srv-port (no -h or -p for nested fields)
+# CLI: --srv-host, --srv-port (no -H or -p for nested fields)
 ```
 
 **No Prefix** → Short options are **enabled**:
@@ -677,16 +701,16 @@ class Config:
 ```python
 @dataclass
 class Nested:
-    host: str = cli_short("h", default="nested-host")
+    host: str = cli_short("x", default="nested-host")
 
 @dataclass
 class Config:
-    help_text: str = cli_short("h", default="help")
+    proxy: str = cli_short("x", default="none")
     nested: Nested = cli_nested(prefix="", default_factory=Nested)
 
 # ERROR: Short option collision detected:
-#   -h
-#     - help_text (--help-text)
+#   -x
+#     - proxy (--proxy)
 #     - nested.host (--host)
 # Solution: Use different short options or add prefix
 ```
@@ -877,7 +901,7 @@ memory: 1g
 
 1. **Parsing**: Field is treated as a dict field (supports file path loading + property overrides)
 2. **Assembly**: All config sources merge normally (base_configs → config file → CLI)
-3. **Resolution** (Stage 3.8): Resolver function called on non-None values
+3. **Resolution** (pipeline stage 8): Resolver function called on non-None values
 4. **Result**: Dict is transformed into the typed object for the dataclass
 
 #### List Fields
@@ -917,7 +941,7 @@ $ python app.py --plugins "plugins/*.json" "extra/*.yaml"
 
 #### Compatibility
 
-- **Works with**: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- **Works with**: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge` (list rules run on the raw values, before the resolver), `combine_annotations`
 - **Incompatible with** (on same field): `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - **Nested fields**: Allowed in nested dataclasses, but resolver is NOT called (value stays raw)
 
@@ -933,8 +957,11 @@ If the resolver itself raises `ConfigurationError`, it's re-raised without wrapp
 **See also:**
 - [`examples/cli_resolve_example.py`](examples/cli_resolve_example.py) - Complete working example
 
+### Config Files, Dict Files and Property Overrides Together
 
+A `--config` file, a dict-field file and individual property overrides compose in precedence order:
 
+```yaml
 # config.yaml
 name: "DefaultApp"
 count: 100
@@ -945,12 +972,6 @@ database:
 ```
 
 ```python
-@dataclass
-class DatabaseConfig:
-    host: str = "localhost"
-    port: int = 5432
-    timeout: float = 30.0
-
 @dataclass
 class AppConfig:
     name: str
@@ -963,6 +984,9 @@ config = build_config_from_cli(AppConfig, [
     '--database', 'db.json',    # Load additional database config
     '--d', 'timeout:60'         # Override database.timeout property
 ])
+# db.json = {"pool": 5}  →
+# AppConfig(name='OverriddenApp', count=100,
+#           database={'host': 'localhost', 'port': 5432, 'timeout': 60, 'pool': 5})
 ```
 
 ### Object Instantiation
@@ -1017,7 +1041,7 @@ server = instantiate(config)
 ### Custom Help and Annotations
 
 ```python
-from dataclass_args import cli_help, cli_exclude, cli_file_loadable
+from dataclass_args import cli_help, cli_exclude, cli_file_loadable, combine_annotations
 
 @dataclass
 class ServerConfig:
@@ -1026,7 +1050,9 @@ class ServerConfig:
     port: int = cli_help("Server port number", default=8000)
 
     # File-loadable with help
-    ssl_cert: str = cli_file_loadable(cli_help("SSL certificate content"))
+    ssl_cert: str = combine_annotations(
+        cli_file_loadable(), cli_help("SSL certificate content"), default=""
+    )
 
     # Hidden from CLI
     secret_key: str = cli_exclude(default="auto-generated")
@@ -1044,19 +1070,21 @@ from pathlib import Path
 @dataclass
 class MLConfig:
     # Basic types
-    model_name: str = cli_help("Model identifier")
+    model_name: str = cli_help("Model identifier", default="baseline")
     learning_rate: float = cli_help("Learning rate", default=0.001)
     epochs: int = cli_help("Training epochs", default=100)
 
     # Complex types
     layer_sizes: List[int] = cli_help("Neural network layer sizes", default_factory=lambda: [128, 64])
-    hyperparameters: Dict[str, Any] = cli_help("Model hyperparameters")
+    hyperparameters: Dict[str, Any] = cli_help("Model hyperparameters", default_factory=dict)
 
     # Optional types
-    checkpoint_path: Optional[Path] = cli_help("Path to model checkpoint")
+    checkpoint_path: Optional[Path] = cli_help("Path to model checkpoint", default=None)
 
     # File-loadable configurations
-    training_config: str = cli_file_loadable(cli_help("Training configuration"))
+    training_config: str = combine_annotations(
+        cli_file_loadable(), cli_help("Training configuration"), default=""
+    )
 
     def __post_init__(self):
         # Custom validation
@@ -1148,7 +1176,7 @@ config = build_config(
 |------|----------|---------|
 | **Scalar** (str, int, float) | Replace | Later value replaces earlier value |
 | **List** | Replace | Later list replaces earlier list (not appended) |
-| **Dict** | Shallow merge | Keys are merged; later sources override earlier keys |
+| **Dict** | One-level merge | Top-level keys are merged; later sources override earlier keys. Nested dicts inside a key are replaced, not merged |
 
 **Dict merge example:**
 ```python
@@ -1162,6 +1190,134 @@ config = build_config(
 {'name': 'app', 'db': {'host': 'localhost', 'port': 3306, 'timeout': 30}}
 #  ^unchanged    ^merged: host kept, port updated, timeout added
 ```
+
+**Nested dict replaced example:**
+```python
+# base_configs[0]: {'db': {'host': 'h', 'opts': {'x': 1}}}
+# base_configs[1]: {'db': {'opts': {'y': 2}}}
+# Result:          {'db': {'host': 'h', 'opts': {'y': 2}}}   # host kept, opts replaced
+```
+
+#### Deep Merge
+
+By default, dicts from different sources are merged **one level** deep: a nested dict inside a key is replaced, not merged. Pass `merge_strategy="deep"` to merge dicts recursively at every depth, at every point where two sources meet (`base_configs`, `--config`, `--field file.json`, and nested dataclass values):
+
+```python
+from dataclass_args import build_config, MERGE_DEEP
+
+@dataclass
+class AppConfig:
+    db: Dict[str, Any] = field(default_factory=dict)
+
+layers = [
+    {'db': {'host': 'localhost', 'pool': {'min': 1, 'max': 10}}},
+    {'db': {'pool': {'max': 50}}},
+]
+
+build_config(AppConfig, [], base_configs=layers).db
+# {'host': 'localhost', 'pool': {'max': 50}}             # default: pool replaced
+
+build_config(AppConfig, [], base_configs=layers, merge_strategy=MERGE_DEEP).db
+# {'host': 'localhost', 'pool': {'min': 1, 'max': 50}}   # deep: pool merged
+```
+
+Both modes follow the same rules:
+- Lists **replace** (but see [list-merge rules](#layered-configuration)).
+- An explicit `None` **clears** a value.
+- Precedence is unchanged.
+- The objects you pass in are never mutated.
+
+The same semantics are available as a utility function: `deep_merge(base, override)` returns a new dict and leaves both inputs untouched.
+
+`merge_strategy` is accepted by `build_config`, `build_config_from_cli`, `build_config_from_dict` and `GenericConfigBuilder.build_config`. See [`examples/deep_merge_example.py`](examples/deep_merge_example.py).
+
+#### Layered Configuration
+
+Tools that combine platform defaults, a user's own config and mandatory platform overrides need three things beyond deep merge. This is similar to systemd drop-in directories, or to Docker Compose's per-field merge rules:
+- **Named layers**, so you can tell where a value came from.
+- A way for an override layer to **add to a list** instead of replacing it.
+- A record of **which layer set what**.
+
+All three need `merge_strategy="deep"`.
+
+**Named layers.** `ConfigLayer` is accepted anywhere `base_configs` accepts a path or a dict:
+
+```python
+from dataclass_args import ConfigLayer
+
+base_configs = [
+    ConfigLayer("defaults.d/10-platform.yaml", name="platform"),
+    ConfigLayer(agent_dict, name="agent.yaml"),
+    ConfigLayer(overrides_dict, name="overrides", list_merge="rules"),
+]
+```
+
+**List-merge rules.** In a layer with `list_merge="rules"`, the list fields and dict paths annotated with `cli_list_merge()` **append** instead of replacing. Lists you haven't annotated still replace, and CLI arguments always replace.
+
+```python
+from dataclass_args import cli_list_merge, combine_annotations
+
+@dataclass
+class AgentConfig:
+    plugins: List[str] = combine_annotations(
+        cli_list_merge("append_unique"), default_factory=list)
+    skills: Dict[str, Any] = combine_annotations(
+        cli_list_merge("append_unique", paths=["roots", "policy.denied"]),
+        default_factory=dict)
+
+layers = [
+    {"plugins": ["dev"],
+     "skills": {"roots": ["./sk"], "policy": {"denied": ["old"], "execution": "allow"}}},
+    ConfigLayer({"plugins": ["guard"],
+                 "skills": {"policy": {"denied": ["exfil"], "execution": "deny"}}},
+                list_merge="rules"),
+]
+cfg = build_config(AgentConfig, [], base_configs=layers, merge_strategy="deep")
+cfg.plugins  # ['dev', 'guard']
+cfg.skills   # {'roots': ['./sk'], 'policy': {'denied': ['old', 'exfil'], 'execution': 'deny'}}
+```
+
+The two modes:
+- `"append"`: concatenates the lists.
+- `"append_unique"`: adds only the elements not already present, compared with `==` (so dicts work too). Existing order is kept.
+
+Rules apply only where **both** sides are lists. Otherwise the later value wins as usual, so `None` still clears. Annotate list or dict fields inside nested dataclasses to apply rules at any depth. With `build_config_from_dict(..., merge_strategy="deep", config_list_merge="rules")`, the `config` dict itself is a rules layer.
+
+**Provenance.** Pass `return_provenance=True` to get `(instance, Provenance)`:
+
+```python
+cfg, prov = build_config_from_dict(
+    AgentConfig, {}, base_configs=[
+        ConfigLayer({"skills": {"policy": {"execution": "deny"}}}, name="platform"),
+        ConfigLayer({"skills": {"policy": {"execution": "allow"}}}, name="agent"),
+    ],
+    merge_strategy="deep", return_provenance=True)
+
+prov.source("skills.policy.execution")   # 'agent'
+prov.changes()   # [ProvenanceChange(path='skills.policy.execution', from_layer='platform',
+                 #   from_value='deny', to_layer='agent', to_value='allow', action='replaced')]
+print(prov.explain())                    # path | source | value  table
+```
+
+| Method | Returns |
+|---|---|
+| `entries(path)` | Every layer that touched `path`, in order (`set`, `replaced`, `confirmed`, `cleared`, `appended`, `removed`) |
+| `source(path)` | The layer that set the final value; `"default"` for an unset dataclass field; `None` for unknown paths |
+| `paths()` | All layer-set leaf paths (dotted, sorted) |
+| `changes()` | Every place where a later layer **discarded** an earlier value. Appends and identical re-sets aren't changes. |
+| `explain()` | A plain-text table of every path, its source and its value |
+
+Some details:
+- Paths are dotted, and lists are leaves.
+- Provenance records **raw** layer values: after files are loaded, but before `@file` and `cli_resolve` resolution. The instance holds the resolved values.
+- The layer names are:
+  - the `ConfigLayer` name;
+  - otherwise the file path, or `base_configs[i]` for a dict;
+  - `config_file:<path>` for `--config`;
+  - `config` for the `build_config_from_dict` dict;
+  - `cli` for the command line.
+
+See [`examples/layered_config_example.py`](examples/layered_config_example.py).
 
 #### Real-World Example
 
@@ -1299,11 +1455,11 @@ $ python app.py --model-config model.yaml --mc tags.0:first --mc tags.+:last
 ```
 
 **Index rules:**
-- `items.0` — set element at index 0 (list must already exist and index must be in range)
-- `items.+` — append new element to list
+- `items.0` — set element at index 0 (the list must already exist and the index must be in range, otherwise `ConfigurationError`)
+- `items.+` — append new element to list (the list must already exist)
 - `items.0.name` — navigate into list element 0, then set `name` property
 - Negative indices are not supported
-- If the container is a dict (not a list), numeric keys create string dict keys: `{"0": "value"}`
+- If the container is a dict (not a list), `0` and `+` are ordinary string keys: `{"0": "value"}`. So if `items` doesn't exist yet, `items.0:x` creates `{"items": {"0": "x"}}`; set the list first if you want list behaviour
 
 #### Override Name Collisions
 
@@ -1352,12 +1508,15 @@ config = build_config_from_dict(
 
 **Key behaviors:**
 - `@file` references resolved for `cli_file_loadable` fields (loads file content)
-- Dict-file paths (`.json`/`.yaml`/`.toml`) loaded for dict-typed fields
+- Dict-file paths (`.json`/`.yaml`/`.yml`/`.toml`) loaded for dict-typed fields, including inside nested dataclasses
 - `cli_resolve()` resolvers fire on assembled values
-- Nested dataclasses (`cli_nested`) reconstruct from nested dicts
-- `base_configs` support with same precedence rules as CLI mode
-- Fields with defaults work when omitted from the dict
+- Nested dataclasses (`cli_nested`, any depth) reconstruct from nested dicts or instances
+- `base_configs` support with same precedence rules as CLI mode (including `ConfigLayer`, `merge_strategy` and provenance)
+- Fields with defaults work when omitted from the dict; an explicit `None` clears a value
+- Every positional field can be set (there is no command line to require it)
+- Hyphenated field names (`"db-host"`) are accepted
 - `cli_exclude()` fields are settable (no CLI to exclude from)
+- Never exits the process: errors are raised as `ConfigurationError` / `ConfigBuilderError`
 - Only accepts `Dict[str, Any]` — raises `TypeError` for non-dict inputs
 
 **What does NOT apply via dict:**
@@ -1375,7 +1534,7 @@ config = build_config_from_dict(
 
 ### Main Functions
 
-#### `build_config(config_class, args=None)`
+#### `build_config(config_class, args=None, base_configs=None, description=None, merge_strategy="shallow", return_provenance=False)`
 
 Generate CLI from dataclass and parse arguments.
 
@@ -1391,8 +1550,13 @@ Generate CLI with additional options.
 config = build_config_from_cli(
     MyDataclass,
     args=['--name', 'test'],
+    base_configs=['defaults.yaml', {'debug': True}],
+    base_config_name='config',      # name of the --config option
+    merge_strategy='deep',          # optional: recursive dict merge
+)
+```
 
-#### `build_config_from_dict(config_class, config, base_configs=None)`
+#### `build_config_from_dict(config_class, config, base_configs=None, config_list_merge="replace", merge_strategy="shallow", return_provenance=False)`
 
 Build a dataclass instance from a dictionary with full resolution pipeline. Recommended for Lambda handlers, SDKs, and test harnesses.
 
@@ -1521,7 +1685,7 @@ sandbox: Optional[SandboxBase] = combine_annotations(
 
 **Important:**
 - Resolver is NOT called when value is None
-- Compatible with: `cli_help`, `cli_short`, `cli_choices`, `combine_annotations`
+- Compatible with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `combine_annotations`
 - Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - In nested dataclasses: allowed but resolver NOT called (value stays raw)
 
@@ -1578,7 +1742,7 @@ Dataclass CLI supports standard Python types:
 | `float` | Parsed as float | `--rate 0.1` |
 | `bool` | Flag with negative | `--debug` or `--no-debug` |
 | `List[T]` | Multiple values | `--items a b c` |
-| `Dict[str, Any]` | Config file + property overrides | `--config file.json --c key:value --c items.0:new` |
+| `Dict[str, Any]` | Dict or structured file + property overrides | `--model-config m.json --mc temperature:0.9 --mc tags.0:new` |
 | `Optional[T]` | Optional parameter | `--timeout 30` (or omit) |
 | `Path` | Path object | `--output /path/to/file` |
 | Custom types | String representation | `--custom "value"` |
@@ -1608,7 +1772,7 @@ database:
   port: 5432
 ```
 
-### TOML (requires `pip install "dataclass-args[toml]"`)
+### TOML (built in, via the standard library's `tomllib`)
 ```toml
 name = "MyApp"
 count = 42
@@ -1622,17 +1786,26 @@ port = 5432
 
 Check the [`examples/`](examples/) directory for complete working examples:
 
+- **`basic_example.py`** / **`advanced_example.py`** - Getting started; file loading and config files
 - **`positional_example.py`** - Positional arguments and variable length args
 - **`boolean_flags_example.py`** - Boolean flags with `--flag` and `--no-flag`
 - **`cli_choices_example.py`** - Value validation with choices
 - **`cli_short_example.py`** - Short option flags
+- **`cli_append_example.py`** - Repeatable options (`cli_append`)
+- **`nested_dataclass.py`** / **`nested_short_options.py`** - Nested dataclasses and their short options
+- **`config_merging_example.py`** - `base_configs` and `--config` precedence
+- **`deep_merge_example.py`** - Shallow vs deep merge
+- **`layered_config_example.py`** - Named layers, list-merge rules and provenance
 - **`cli_resolve_example.py`** - Post-load field resolution with factory pattern
+- **`programmatic_example.py`** - `build_config_from_dict()` without a CLI
+- **`custom_description_example.py`** - Custom parser descriptions
 - **`all_features_example.py`** - All features together
 - And more...
 
 ### Web Server Configuration
 
 ```python
+import os
 from dataclasses import dataclass
 from typing import List
 from dataclass_args import build_config, cli_short, cli_help, cli_exclude, cli_file_loadable, combine_annotations
@@ -1641,7 +1814,7 @@ from dataclass_args import build_config, cli_short, cli_help, cli_exclude, cli_f
 class ServerConfig:
     # Basic server settings
     host: str = combine_annotations(
-        cli_short('h'),
+        cli_short('H'),
         cli_help("Server bind address"),
         default="127.0.0.1"
     )
@@ -1659,8 +1832,12 @@ class ServerConfig:
     )
 
     # Security settings
-    ssl_cert: str = cli_file_loadable(cli_help("SSL certificate content"))
-    ssl_key: str = cli_file_loadable(cli_help("SSL private key content"))
+    ssl_cert: str = combine_annotations(
+        cli_file_loadable(), cli_help("SSL certificate content"), default=""
+    )
+    ssl_key: str = combine_annotations(
+        cli_file_loadable(), cli_help("SSL private key content"), default=""
+    )
 
     # Application settings
     debug: bool = combine_annotations(
@@ -1681,7 +1858,7 @@ if __name__ == "__main__":
 
 ```bash
 # Start server with short options
-$ python server.py -h 0.0.0.0 -p 9000 -w 4 -d
+$ python server.py -H 0.0.0.0 -p 9000 -w 4 -d
 
 # Load SSL certificates from files
 $ python server.py --ssl-cert "@certs/server.crt" --ssl-key "@certs/server.key"
@@ -1690,14 +1867,6 @@ $ python server.py --ssl-cert "@certs/server.crt" --ssl-key "@certs/server.key"
 ## Contributing
 
 Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Setup
-
-```bash
-git clone https://github.com/bassmanitram/dataclass-args.git
-cd dataclass-args
-pip install -e ".[dev,all]"
-```
 
 ### Development Setup
 
@@ -1730,13 +1899,13 @@ pytest -v
 
 ### Code Coverage
 
-This project maintains **94%+ code coverage**. Coverage reports are generated automatically when running tests.
+This project maintains **98%+ code coverage** (branch coverage). Coverage reports are generated automatically when running tests.
 
 - **Quick check**: `make coverage`
 - **Detailed report**: See `htmlcov/index.html`
-- **Coverage docs**: [COVERAGE.md](COVERAGE.md)
+- **Coverage docs**: [COVERAGE.md](docs/COVERAGE.md)
 
-All code changes should maintain or improve coverage. The minimum required coverage is 90%.
+All code changes should maintain or improve coverage. CI fails below 88%.
 
 ### Code Formatting
 
@@ -1787,7 +1956,10 @@ from dataclass_args import (
     cli_file_loadable,           # @file loading
     cli_override_name,           # Custom dict override abbreviation
     cli_resolve,                 # Post-load resolution
+    cli_list_merge,              # Append-in-rules-layers list fields
     combine_annotations,         # Combine features
+    ConfigLayer,                 # Named config layer (replace | rules)
+    deep_merge,                  # Recursive dict merge utility
     InstantiationError,          # Instantiation failures
 )
 

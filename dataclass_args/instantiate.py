@@ -20,24 +20,10 @@ Features:
 """
 
 import importlib
-from typing import Any, Dict, FrozenSet, Optional, Type
+from types import UnionType
+from typing import Any, Dict, FrozenSet, Optional, Type, Union, get_args, get_origin
 
 from .exceptions import InstantiationError
-
-# Import typing utilities with Python 3.8+ compatibility
-try:
-    from typing import get_args, get_origin  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover
-    from typing_extensions import (  # type: ignore[assignment,no-redef]  # pragma: no cover
-        get_args,
-        get_origin,
-    )
-
-# Python 3.10+ PEP 604 union type support (X | Y syntax)
-try:
-    from types import UnionType as _UnionType  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover
-    _UnionType = None  # type: ignore[assignment,misc]  # pragma: no cover
 
 # Builtin types that should not be recursively instantiated
 _BUILTINS: FrozenSet[Type] = frozenset(
@@ -225,6 +211,57 @@ def _from_string(
         ) from exc
 
 
+def _require_string(value: Any, key: str, path: str, description: str = "") -> str:
+    """Return `value` if it is a string, otherwise raise InstantiationError."""
+    if not isinstance(value, str):
+        raise InstantiationError(
+            f"'{key}' must be a string{description}, "
+            f"got {type(value).__name__} (at '{path}')"
+        )
+    return value
+
+
+def _lookup_registry(registry: Dict[str, str], type_name: str, path: str) -> str:
+    """Return the class path registered for `type_name`, or raise InstantiationError."""
+    if type_name not in registry:
+        raise InstantiationError(
+            f"Type '{type_name}' not found in registry "
+            f"(available: {sorted(registry.keys())}) (at '{path}')"
+        )
+    return registry[type_name]
+
+
+def _construct_from_target(
+    kwargs: Dict[str, Any],
+    target_path: str,
+    attr_path: Optional[str],
+    *,
+    registry: Optional[Dict[str, str]],
+    target_key: str,
+    type_key: str,
+    attr_key: Optional[str],
+    recursive: bool,
+    max_depth: int,
+    path: str,
+) -> Any:
+    """Import the target class, resolve its kwargs, construct it and traverse attrs."""
+    cls = _import_target(target_path, path=path)
+    resolved_kwargs = _resolve_kwargs(
+        kwargs,
+        cls=cls,
+        registry=registry,
+        target_key=target_key,
+        type_key=type_key,
+        attr_key=attr_key,
+        recursive=recursive,
+        max_depth=max_depth,
+        path=path,
+    )
+
+    obj = _construct(cls, resolved_kwargs, target_path=target_path, path=path)
+    return _traverse_attr(obj, attr_path, path=path)
+
+
 def _from_dict(
     config: Dict[str, Any],
     *,
@@ -258,20 +295,15 @@ def _from_dict(
     # Rule 4: Dict with _target_ key → direct import
     if target_key in config:
         kwargs = dict(config)  # Copy before mutating
-        target_path = kwargs.pop(target_key)
-
-        if not isinstance(target_path, str):
-            raise InstantiationError(
-                f"'{target_key}' must be a string (class path), "
-                f"got {type(target_path).__name__} (at '{path}')"
-            )
-
+        target_path = _require_string(
+            kwargs.pop(target_key), target_key, path, " (class path)"
+        )
         attr_path = kwargs.pop(attr_key, None) if attr_key else None
 
-        cls = _import_target(target_path, path=path)
-        resolved_kwargs = _resolve_kwargs(
+        return _construct_from_target(
             kwargs,
-            cls=cls,
+            target_path,
+            attr_path,
             registry=registry,
             target_key=target_key,
             type_key=type_key,
@@ -280,34 +312,18 @@ def _from_dict(
             max_depth=max_depth,
             path=path,
         )
-
-        obj = _construct(cls, resolved_kwargs, target_path=target_path, path=path)
-        return _traverse_attr(obj, attr_path, path=path)
 
     # Rule 5: Dict with type key + registry → registry lookup
     if type_key in config and registry is not None:
         kwargs = dict(config)  # Copy before mutating
-        type_name = kwargs.pop(type_key)
-
-        if not isinstance(type_name, str):
-            raise InstantiationError(
-                f"'{type_key}' must be a string, "
-                f"got {type(type_name).__name__} (at '{path}')"
-            )
-
+        type_name = _require_string(kwargs.pop(type_key), type_key, path)
         attr_path = kwargs.pop(attr_key, None) if attr_key else None
+        target_path = _lookup_registry(registry, type_name, path)
 
-        if type_name not in registry:
-            raise InstantiationError(
-                f"Type '{type_name}' not found in registry "
-                f"(available: {sorted(registry.keys())}) (at '{path}')"
-            )
-
-        target_path = registry[type_name]
-        cls = _import_target(target_path, path=path)
-        resolved_kwargs = _resolve_kwargs(
+        return _construct_from_target(
             kwargs,
-            cls=cls,
+            target_path,
+            attr_path,
             registry=registry,
             target_key=target_key,
             type_key=type_key,
@@ -316,9 +332,6 @@ def _from_dict(
             max_depth=max_depth,
             path=path,
         )
-
-        obj = _construct(cls, resolved_kwargs, target_path=target_path, path=path)
-        return _traverse_attr(obj, attr_path, path=path)
 
     # Rule 6: Dict with neither key → return as-is
     return config
@@ -778,25 +791,11 @@ def _unwrap_optional(annotation: Type) -> Type:
     """
     origin = get_origin(annotation)
 
-    # Check typing.Union (includes Optional)
-    try:
-        from typing import Union
-
-        if origin is Union:
-            args = get_args(annotation)
-            non_none = [a for a in args if a is not type(None)]
-            if len(non_none) == 1:
-                return non_none[0]
-            return annotation
-    except ImportError:  # pragma: no cover
-        pass  # pragma: no cover
-
-    # Check PEP 604 union type (Python 3.10+): X | None
-    if _UnionType is not None and origin is _UnionType:
+    # typing.Union (includes Optional) and PEP 604 unions (X | None)
+    if origin is Union or origin is UnionType:
         args = get_args(annotation)
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:
             return non_none[0]
-        return annotation
 
     return annotation

@@ -303,7 +303,7 @@ def example_servers():
             default_factory=list,
         )
 
-        health_check: bool = cli_short("h", default=True)
+        health_check: bool = cli_short("H", default=True)
 
     config = build_config(
         LoadBalancerConfig,
@@ -319,7 +319,7 @@ def example_servers():
             "-s",
             "server3.example.com",
             "8080",
-            "-h",
+            "-H",
         ],
     )
 

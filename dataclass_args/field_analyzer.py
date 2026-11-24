@@ -24,15 +24,11 @@ Key Concepts:
 """
 
 from dataclasses import MISSING, fields, is_dataclass
-from typing import Any, Dict, Optional, Tuple, Type
-
-# Import typing utilities with Python 3.8+ compatibility
-try:
-    from typing import get_type_hints  # type: ignore[attr-defined,no-redef]
-except ImportError:  # pragma: no cover
-    from typing_extensions import get_type_hints  # type: ignore[assignment,no-redef]  # noqa: E501  # pragma: no cover
+from typing import Any, Dict, Optional, Tuple, Type, get_type_hints
 
 from .annotations import (
+    LIST_MERGE_MODES,
+    get_cli_list_merge,
     get_cli_nested_prefix,
     get_cli_override_name,
     get_cli_positional_nargs,
@@ -45,8 +41,25 @@ from .annotations import (
     is_cli_resolve,
 )
 from .exceptions import ConfigBuilderError
-from .nested_processor import NestedFieldProcessor
+from .nested_processor import NestedFieldProcessor, mapping_source
 from .type_inspector import TypeInspector
+
+
+def compose_override_name(info: Dict[str, Any], prefix: str) -> str:
+    """
+    Compute the override argument name of a dict field under a (composed) prefix.
+
+    Args:
+        info: Field info dict containing override_name
+        prefix: Composed prefix of the nested fields (empty string = no prefix)
+
+    Returns:
+        Override argument name (e.g., "--mc" or "--agent-mc")
+    """
+    if prefix == "":
+        return info.get("override_name", "")
+    base_override = info.get("override_name", "").lstrip("--")
+    return f"--{prefix}{base_override}" if base_override else f"--{prefix}override"
 
 
 class FieldAnalyzer:
@@ -162,7 +175,118 @@ class FieldAnalyzer:
         # Check for cli_resolve and validate/force appropriate behavior
         self._apply_resolve_overrides(field_info, field_obj, is_list)
 
+        # Check for cli_list_merge and validate it against the field type
+        self._validate_list_merge(field_obj, field_info)
+
         return field_info
+
+    def _validate_list_merge(self, field_obj: Any, field_info: Dict[str, Any]) -> None:
+        """
+        Validate a cli_list_merge annotation against the field's type.
+
+        Raises:
+            ConfigBuilderError: Naming the field, if the annotation is invalid
+        """
+        rule = get_cli_list_merge(field_info)
+        if rule is None:
+            return
+        problem = self._list_merge_problem(rule, field_info)
+        if problem:
+            raise ConfigBuilderError(
+                f"Field '{field_obj.name}': cli_list_merge {problem}"
+            )
+
+    @staticmethod
+    def _list_merge_problem(
+        rule: Dict[str, Any], field_info: Dict[str, Any]
+    ) -> Optional[str]:
+        """Describe what is wrong with a cli_list_merge rule, or return None."""
+        if rule.get("mode") not in LIST_MERGE_MODES:
+            return (
+                f"mode must be one of {list(LIST_MERGE_MODES)}, "
+                f"got {rule.get('mode')!r}"
+            )
+        if field_info["is_nested_dataclass"] or is_cli_nested(field_info):
+            return (
+                "cannot be used on a cli_nested field; annotate the fields "
+                "inside the nested dataclass instead"
+            )
+        if field_info["is_list"]:
+            return "'paths' is only valid on dict fields" if rule.get("paths") else None
+        if field_info["is_dict"]:
+            return None if rule.get("paths") else "on a dict field requires 'paths'"
+        return "is only valid on list or dict fields"
+
+    def build_list_merge_rules(self) -> Dict[Tuple[str, ...], str]:
+        """
+        Build the list-merge rule map for this dataclass and everything nested in it.
+
+        Every field is read from the dataclass metadata (including cli_exclude
+        fields), recursing into cli_nested classes at any depth.
+
+        Returns:
+            Map of full key path (e.g. ("mid", "skills", "roots")) to mode
+        """
+        rules: Dict[Tuple[str, ...], str] = {}
+        self._collect_list_merge_rules(self.config_class, (), rules)
+        return rules
+
+    def _collect_list_merge_rules(
+        self,
+        config_class: Type,
+        prefix: Tuple[str, ...],
+        rules: Dict[Tuple[str, ...], str],
+    ) -> None:
+        """Add the rules of `config_class` (and its nested classes) under `prefix`."""
+        analyzer = FieldAnalyzer(config_class)
+        type_hints = get_type_hints(config_class)
+        for field_obj in fields(config_class):
+            info = analyzer._analyze_single_field(field_obj, type_hints)
+            path = prefix + (field_obj.name,)
+            if info["is_nested_dataclass"]:
+                self._collect_list_merge_rules(info["type"], path, rules)
+                continue
+            rule = get_cli_list_merge(info)
+            if rule is None:
+                continue
+            for suffix in self._rule_suffixes(rule):
+                rules[path + suffix] = rule["mode"]
+
+    def build_field_leaf_map(self) -> Dict[Tuple[str, ...], Any]:
+        """
+        Map every dataclass field leaf path to its dataclasses.Field.
+
+        A field leaf is a non-cli_nested field at the top level or under a chain
+        of cli_nested fields (``name``, ``mid.w``, ``mid.inner.opts``). All
+        fields are included, cli_exclude fields too.
+        """
+        leaves: Dict[Tuple[str, ...], Any] = {}
+        self._collect_field_leaves(self.config_class, (), leaves)
+        return leaves
+
+    def _collect_field_leaves(
+        self,
+        config_class: Type,
+        prefix: Tuple[str, ...],
+        leaves: Dict[Tuple[str, ...], Any],
+    ) -> None:
+        """Add the field leaves of `config_class` (and nested classes) under `prefix`."""
+        analyzer = FieldAnalyzer(config_class)
+        type_hints = get_type_hints(config_class)
+        for field_obj in fields(config_class):
+            info = analyzer._analyze_single_field(field_obj, type_hints)
+            path = prefix + (field_obj.name,)
+            if info["is_nested_dataclass"]:
+                self._collect_field_leaves(info["type"], path, leaves)
+            else:
+                leaves[path] = field_obj
+
+    @staticmethod
+    def _rule_suffixes(rule: Dict[str, Any]) -> list:
+        """Key-path suffixes a rule applies to: () for a list field, else each path."""
+        if not rule.get("paths"):
+            return [()]
+        return [tuple(path.split(".")) for path in rule["paths"]]
 
     def _determine_nested_prefix(
         self, field_type: Type, field_obj: Any
@@ -467,17 +591,8 @@ class FieldAnalyzer:
                 prev_mapping = cli_names[cli_name]
 
                 # Build descriptive collision info
-                if mapping.get("parent_field"):
-                    source1 = f"{mapping['parent_field']}.{mapping['nested_field']}"
-                else:
-                    source1 = mapping["field_name"]
-
-                if prev_mapping.get("parent_field"):
-                    source2 = (
-                        f"{prev_mapping['parent_field']}.{prev_mapping['nested_field']}"
-                    )
-                else:
-                    source2 = prev_mapping["field_name"]
+                source1 = mapping_source(mapping)
+                source2 = mapping_source(prev_mapping)
 
                 collisions.append((cli_name, source1, source2))
             else:
@@ -558,29 +673,30 @@ class FieldAnalyzer:
         collisions: list = []
 
         for cli_name, mapping in flat_fields.items():
-            if mapping.get("parent_field"):
-                # Nested field - only check if no prefix
-                prefix = mapping["prefix"]
-                if prefix == "":
-                    info = mapping["nested_info"]
-                    short = get_cli_short(info)
-                    if short:
-                        source = f"{mapping['parent_field']}.{mapping['nested_field']}"
-                        self._check_short_option_collision(
-                            short, cli_name, source, short_options, collisions
-                        )
-            else:
-                # Regular field
-                info = mapping["field_info"]
-                if not info.get("is_nested_dataclass", False):
-                    short = get_cli_short(info)
-                    if short:
-                        source = mapping["field_name"]
-                        self._check_short_option_collision(
-                            short, cli_name, source, short_options, collisions
-                        )
+            short = self._mapping_short_option(mapping)
+            if short:
+                self._check_short_option_collision(
+                    short, cli_name, mapping_source(mapping), short_options, collisions
+                )
 
         return short_options, collisions
+
+    @staticmethod
+    def _mapping_short_option(mapping: Dict[str, Any]) -> Optional[str]:
+        """
+        Return the short option a flat mapping registers, if any.
+
+        Nested fields only support short options when their composed prefix is
+        empty; nested dataclass containers themselves have none.
+        """
+        if mapping.get("parent_field"):
+            if mapping["prefix"] != "":
+                return None
+            return get_cli_short(mapping["nested_info"])
+        info = mapping["field_info"]
+        if info.get("is_nested_dataclass", False):
+            return None
+        return get_cli_short(info)
 
     def _check_short_option_collision(
         self,
@@ -664,17 +780,72 @@ class FieldAnalyzer:
         """
         seen: Dict[str, str] = {}
         for field_name, info in config_fields.items():
-            if not info.get("is_dict", False):
-                continue
-            override = info.get("override_name", "")
-            if not override:
-                continue
-            if override in seen:
-                raise ConfigBuilderError(
-                    f"Override name collision detected:\n"
-                    f"  {override}\n"
-                    f"    - {seen[override]}\n"
-                    f"    - {field_name}\n"
-                    f"Use cli_override_name() to set a custom override for one of them."
+            if info.get("is_dict", False):
+                self._record_override_name(
+                    seen, info.get("override_name", ""), field_name
                 )
-            seen[override] = field_name
+
+        # Dict fields inside nested dataclasses (at any depth) use the composed prefix
+        flat_fields = self.flatten_nested_fields(config_fields)
+        for mapping in flat_fields.values():
+            nested_info = mapping.get("nested_info")
+            if nested_info is not None and nested_info.get("is_dict", False):
+                override = compose_override_name(nested_info, mapping["prefix"])
+                self._record_override_name(seen, override, mapping_source(mapping))
+
+    @staticmethod
+    def _record_override_name(seen: Dict[str, str], override: str, source: str) -> None:
+        """Record an override name, raising if another field already uses it."""
+        if not override:
+            return
+        if override in seen:
+            raise ConfigBuilderError(
+                f"Override name collision detected:\n"
+                f"  {override}\n"
+                f"    - {seen[override]}\n"
+                f"    - {source}\n"
+                f"Use cli_override_name() to set a custom override for one of them."
+            )
+        seen[override] = source
+
+    def validate_nested_cycles(self, config_fields: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Reject cli_nested dataclasses that contain themselves.
+
+        A nested class that appears again on its own ancestor chain (A.b: B,
+        B.a: A) would flatten forever.
+
+        Args:
+            config_fields: Analyzed field information for the top-level dataclass
+
+        Raises:
+            ConfigBuilderError: Naming the chain, e.g. "A.b -> B.a -> A"
+        """
+        self._walk_nested_chain(
+            self.config_class, config_fields, [self.config_class], []
+        )
+
+    def _walk_nested_chain(
+        self,
+        owner: type,
+        config_fields: Dict[str, Dict[str, Any]],
+        ancestors: list,
+        steps: list,
+    ) -> None:
+        """Depth-first walk over nested dataclass fields, tracking the ancestor chain."""
+        for field_name, info in config_fields.items():
+            if not info.get("is_nested_dataclass", False):
+                continue
+            nested_class = info["type"]
+            chain = steps + [f"{owner.__name__}.{field_name}"]
+            if nested_class in ancestors:
+                raise ConfigBuilderError(
+                    "Circular cli_nested reference: "
+                    f"{' -> '.join(chain + [nested_class.__name__])}"
+                )
+            self._walk_nested_chain(
+                nested_class,
+                FieldAnalyzer(nested_class).analyze_config_fields(),
+                ancestors + [nested_class],
+                chain,
+            )
