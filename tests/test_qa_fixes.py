@@ -8,8 +8,10 @@ CHANGELOG.md for the user-facing description of each fix.
 import argparse
 import contextlib
 import io
+import os
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import pytest
@@ -528,6 +530,11 @@ def test_non_mapping_dict_field_file_is_a_clear_error(tmp_path):
         build_config(Settings, ["--settings", str(path)])
 
 
+def test_fake_home_fixture_redirects_expanduser(fake_home):
+    assert os.path.expanduser("~") == str(fake_home)
+    assert Path("~").expanduser() == fake_home
+
+
 def test_empty_yaml_file_is_an_empty_mapping(tmp_path):
     path = tmp_path / "empty.yaml"
     path.write_text("")
@@ -535,8 +542,7 @@ def test_empty_yaml_file_is_an_empty_mapping(tmp_path):
     assert build_config(Settings, ["--config", str(path)]) == Settings()
 
 
-def test_tilde_is_expanded_in_config_paths(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_tilde_is_expanded_in_config_paths(tmp_path, fake_home):
     (tmp_path / "app.json").write_text('{"name": "from-home"}')
     (tmp_path / "s.json").write_text('{"k": 1}')
 
@@ -714,8 +720,7 @@ def test_B1p_resolve_field_receives_the_string_from_a_layer():
     assert result.inner.opts == "hello"
 
 
-def test_B1p_tilde_path_loads_as_a_dict_field_value(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_B1p_tilde_path_loads_as_a_dict_field_value(tmp_path, fake_home):
     (tmp_path / "x.json").write_text('{"k": 3}')
     assert build_config(Settings, ["--settings", "~/x.json"]).settings == {"k": 3}
     assert build_config(Outer, ["--holder-opts", "~/x.json"]).holder.opts == {"k": 3}
@@ -724,8 +729,7 @@ def test_B1p_tilde_path_loads_as_a_dict_field_value(tmp_path, monkeypatch):
     ).settings == {"k": 3}
 
 
-def test_B1p_tilde_path_to_existing_unknown_extension_file(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_B1p_tilde_path_to_existing_unknown_extension_file(tmp_path, fake_home):
     (tmp_path / "x.conf").write_text("k: 4\n")
     assert build_config(Settings, ["--settings", "~/x.conf"]).settings == {"k": 4}
 
