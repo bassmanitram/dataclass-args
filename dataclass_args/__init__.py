@@ -28,18 +28,20 @@ Basic Usage:
     config = build_config(Config)  # Automatically parses sys.argv
 
 Advanced Usage:
-    from dataclass_args import cli_help, cli_short, cli_choices, cli_file_loadable
+    from dataclass_args import (
+        cli_choices, cli_file_loadable, cli_help, cli_short, combine_annotations
+    )
 
     @dataclass
     class Config:
-        name: str = cli_short('n', cli_help("Application name"))
+        name: str = combine_annotations(cli_short('n'), cli_help("Application name"))
         environment: str = cli_choices(['dev', 'staging', 'prod'])
         region: str = combine_annotations(
             cli_short('r'),
             cli_choices(['us-east', 'us-west', 'eu-west']),
             default='us-east'
         )
-        message: str = cli_file_loadable()  # Supports @filename loading
+        message: str = cli_file_loadable(default="")  # Supports @filename loading
 
     # Usage: -n MyApp --environment prod -r us-west --message @file.txt
     config = build_config(Config)
@@ -81,8 +83,8 @@ Resolver Usage:
 Instantiation Usage:
     from dataclass_args import instantiate
 
-    # Direct target import
-    obj = instantiate({"_target_": "pathlib.Path", "args": ["/tmp"]})
+    # Direct target import (remaining keys are keyword arguments)
+    obj = instantiate({"_target_": "datetime.timedelta", "hours": 2})
 
     # Registry-based lookup
     registry = {"docker": "myapp.sandboxes.DockerSandbox"}
@@ -95,6 +97,7 @@ from .annotations import (
     cli_append,
     cli_choices,
     cli_exclude,
+    cli_extend,
     cli_file_loadable,
     cli_help,
     cli_include,
@@ -119,6 +122,7 @@ from .annotations import (
     get_cli_short,
     is_cli_append,
     is_cli_excluded,
+    is_cli_extend,
     is_cli_file_loadable,
     is_cli_included,
     is_cli_nested,
@@ -143,7 +147,7 @@ from .instantiate import instantiate
 from .provenance import MISSING_VALUE, Provenance, ProvenanceChange, ProvenanceEntry
 from .utils import deep_merge, load_structured_file
 
-__version__ = "1.10.0"
+__version__ = "1.10.1"
 
 __all__ = [
     # Main API
@@ -165,6 +169,7 @@ __all__ = [
     "cli_nested",
     "cli_positional",
     "cli_append",
+    "cli_extend",
     "cli_resolve",
     "combine_annotations",
     "get_cli_short",
@@ -185,6 +190,7 @@ __all__ = [
     "is_cli_nested",
     "is_cli_positional",
     "is_cli_append",
+    "is_cli_extend",
     "is_cli_resolve",
     # File loading
     "load_file_content",

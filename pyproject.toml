@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dataclass-args"
-version = "1.10.0"
+version = "1.10.1"
 description = "Zero-boilerplate CLI generation from Python dataclasses with advanced type support and file loading"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -154,19 +154,6 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 no_implicit_optional = false
-
-[tool.flake8]
-max-line-length = 88
-extend-ignore = ["E203", "W503", "F401", "F541"]
-exclude = [
-    ".git",
-    "__pycache__",
-    ".venv",
-    "build",
-    "dist",
-    ".eggs",
-    "*.egg-info",
-]
 
 [tool.bandit]
 exclude_dirs = ["tests", "examples"]

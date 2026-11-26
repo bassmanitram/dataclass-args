@@ -9,15 +9,16 @@ Coordinates the multi-stage pipeline by delegating to stage-specific processors:
 
 Pipeline Stages:
     1. Normalize base_configs → List[Dict]  (files loaded, types validated,
-                                             dict-field file refs loaded per layer)
-    2. Apply base_configs → merged Dict      (one-level (default) or deep merge per merge_strategy)
-    3. Apply config file → merged Dict       (--config file normalized, merged on top)
-    4. Apply CLI overrides → merged Dict     (per-field: file loading, dict loading, scalars)
-    5. Resolve raw values                    (@file refs in base_configs values that weren't overridden)
-    6. Reconstruct nested fields             (flat dict → nested dataclass instances)
-    7. Validate append ranges                (min_args/max_args enforcement)
-    8. Resolve fields                        (cli_resolve transformations)
-    9. Instantiate dataclass                 (Dict → dataclass instance)
+                                             dict-field file refs loaded)
+    2. Apply base_configs → merged Dict     (one-level or deep merge)
+    3. Apply config file → merged Dict      (normalized, merged on top)
+    4. Apply CLI overrides → merged Dict    (file, dict and scalar handling)
+    5. Resolve raw values                   (@file refs in layer values)
+    6. Reconstruct nested fields            (dicts → nested dataclass instances)
+    7. Validate append ranges               (min_args/max_args enforcement)
+    8. Resolve fields                       (cli_resolve transformations)
+    9. Instantiate dataclass                (Dict → dataclass instance; missing
+                                             required fields are named)
 
 Precedence (later wins):
     base_configs[0] < base_configs[1] < ... < --config file < CLI arguments
@@ -34,6 +35,7 @@ from .layer_normalization import LayerNormalizer
 from .merge_strategy import MERGE_DEEP, MergeContext, make_merge_context
 from .nested_processor import NestedFieldProcessor
 from .provenance import ProvenanceRecorder
+from .utils import describe_missing, missing_required_fields
 from .value_resolution import ValueResolver
 
 
@@ -85,9 +87,11 @@ class ConfigResolver:
         return_provenance: bool = False,
     ) -> Any:
         """
-        Build dataclass instance from parsed CLI arguments with hierarchical config merging.
+        Build dataclass instance from parsed CLI arguments with hierarchical config
+        merging.
 
-        Configuration sources are merged in the following order (later sources override earlier):
+        Configuration sources are merged in the following order (later sources override
+        earlier):
         1. Programmatic base_configs (if provided) - files loaded and applied in order
         2. Config file from --config argument (if provided)
         3. CLI argument overrides
@@ -99,7 +103,8 @@ class ConfigResolver:
                          Can be:
                          - str: Path to a single config file
                          - dict: A single configuration dictionary
-                         - List[Union[str, dict]]: Multiple configs (files and/or dicts) applied in order
+                         - List[Union[str, dict]]: Multiple configs (files and/or dicts)
+                           applied in order
             merge_strategy: How dicts that meet while combining sources are merged:
                            "shallow" (default, one level) or "deep" (recursive)
             return_provenance: If True (requires merge_strategy="deep"), return
@@ -183,6 +188,12 @@ class ConfigResolver:
 
     def _instantiate(self, config_dict: Dict[str, Any]) -> Any:
         """Stage 9: instantiate the dataclass from the resolved dict."""
+        missing = missing_required_fields(self.config_class, config_dict)
+        if missing:
+            raise ConfigurationError(
+                f"Failed to create {self.config_class.__name__}: "
+                f"{describe_missing(missing)}"
+            )
         try:
             return self.config_class(**config_dict)
         except Exception as e:

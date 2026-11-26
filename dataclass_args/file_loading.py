@@ -93,8 +93,8 @@ def process_file_loadable_value(
         The processed string value
 
     Raises:
-        FileLoadingError: If file loading fails
-        ValueError: If value format is invalid
+        ValueError: If the file path is empty or the file cannot be loaded
+            (the message describes the problem; callers add the field context)
     """
     if not isinstance(value, str):
         return value
@@ -114,9 +114,9 @@ def process_file_loadable_value(
     file_path = value[1:]
 
     if not file_path:
-        raise ValueError(f"Empty file path for field '{field_name}' (value: '{value}')")
+        raise ValueError(f"Empty file path after '@' (value: '{value}')")
 
     try:
         return load_file_content(file_path)
     except FileLoadingError as e:
-        raise ValueError(f"Failed to process field '{field_name}': {e}") from e
+        raise ValueError(str(e)) from e

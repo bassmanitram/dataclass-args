@@ -23,8 +23,22 @@ Key Concepts:
       must be last.
 """
 
+import collections
+import types
+from collections import abc
 from dataclasses import MISSING, fields, is_dataclass
-from typing import Any, Dict, Optional, Tuple, Type, get_type_hints
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from .annotations import (
     LIST_MERGE_MODES,
@@ -35,6 +49,7 @@ from .annotations import (
     get_cli_short,
     is_cli_append,
     is_cli_excluded,
+    is_cli_extend,
     is_cli_file_loadable,
     is_cli_nested,
     is_cli_positional,
@@ -43,6 +58,53 @@ from .annotations import (
 from .exceptions import ConfigBuilderError
 from .nested_processor import NestedFieldProcessor, mapping_source
 from .type_inspector import TypeInspector
+
+_CONTAINER_TYPES = (
+    list,
+    tuple,
+    set,
+    frozenset,
+    dict,
+    collections.deque,
+    abc.Collection,
+    abc.Container,
+    abc.Iterable,
+    abc.Sequence,
+    abc.MutableSequence,
+    abc.Set,
+    abc.MutableSet,
+    abc.Mapping,
+    abc.MutableMapping,
+)
+_UNION_ORIGINS = (Union, types.UnionType)
+
+
+def _is_scalar_element(element: Any) -> bool:
+    """
+    Whether a list element type is scalar (a single CLI token per element).
+
+    Containers (list, tuple, set, frozenset, dict, collection ABCs) and
+    dataclasses are not scalar. A Union/Optional is scalar when every
+    non-None member is.
+    """
+    origin = get_origin(element)
+    if origin in _UNION_ORIGINS:
+        return all(
+            _is_scalar_element(member)
+            for member in get_args(element)
+            if member is not type(None)
+        )
+    base = origin if origin is not None else element
+    if base in _CONTAINER_TYPES:
+        return False
+    return not (isinstance(element, type) and is_dataclass(element))
+
+
+def _describe_type(element: Any) -> str:
+    """Render a type readably (no ``typing.`` prefix)."""
+    if isinstance(element, type) and get_origin(element) is None:
+        return element.__qualname__
+    return repr(element).replace("typing.", "")
 
 
 def compose_override_name(info: Dict[str, Any], prefix: str) -> str:
@@ -91,6 +153,12 @@ class FieldAnalyzer:
 
     def should_include_field(self, field_name: str, field_info: Dict[str, Any]) -> bool:
         """Determine if a field should be included in CLI arguments."""
+
+        # init=False fields can't be passed to the constructor, so they can't
+        # be configured at all
+        field_obj = field_info.get("field_obj")
+        if field_obj is not None and not field_obj.init:
+            return False
 
         # Apply annotation filter
         if is_cli_excluded(field_info):
@@ -178,7 +246,59 @@ class FieldAnalyzer:
         # Check for cli_list_merge and validate it against the field type
         self._validate_list_merge(field_obj, field_info)
 
+        # Check for cli_extend and validate it against the field
+        self._validate_extend(field_obj, field_info)
+
         return field_info
+
+    def _validate_extend(self, field_obj: Any, field_info: Dict[str, Any]) -> None:
+        """
+        Validate a cli_extend annotation against the field.
+
+        Raises:
+            ConfigBuilderError: Naming the field, if the annotation is invalid
+        """
+        if not is_cli_extend(field_info):
+            return
+        problems = self._extend_problems(field_info)
+        if problems:
+            raise ConfigBuilderError(
+                f"Field '{field_obj.name}': cli_extend {'; '.join(problems)}"
+            )
+
+    @staticmethod
+    def _extend_problems(field_info: Dict[str, Any]) -> List[str]:
+        """List what is wrong with a cli_extend field (empty when valid)."""
+        conflicts = [
+            name
+            for name, check in (
+                ("cli_append", is_cli_append),
+                ("cli_positional", is_cli_positional),
+                ("cli_exclude", is_cli_excluded),
+            )
+            if check(field_info)
+        ]
+        problems = [f"cannot be combined with {name}" for name in conflicts]
+        if not field_info["is_list"]:
+            problems.append("is only valid on List[T] or Optional[List[T]] fields")
+        else:
+            problem = FieldAnalyzer._element_problem(field_info)
+            if problem:
+                problems.append(problem)
+        return problems
+
+    @staticmethod
+    def _element_problem(field_info: Dict[str, Any]) -> Optional[str]:
+        """Describe a non-scalar list element type, or return None."""
+        if not field_info["args"]:
+            return None
+        element = field_info["args"][0]
+        if _is_scalar_element(element):
+            return None
+        problem = f"requires scalar list elements; got {_describe_type(element)}"
+        if get_origin(element) is list or element is list:
+            problem += "; use cli_append(nargs=...) to collect sub-lists"
+        return problem
 
     def _validate_list_merge(self, field_obj: Any, field_info: Dict[str, Any]) -> None:
         """
@@ -258,7 +378,8 @@ class FieldAnalyzer:
 
         A field leaf is a non-cli_nested field at the top level or under a chain
         of cli_nested fields (``name``, ``mid.w``, ``mid.inner.opts``). All
-        fields are included, cli_exclude fields too.
+        init=True fields are included, cli_exclude fields too; init=False
+        fields can't be configured, so they are left out.
         """
         leaves: Dict[Tuple[str, ...], Any] = {}
         self._collect_field_leaves(self.config_class, (), leaves)
@@ -270,10 +391,12 @@ class FieldAnalyzer:
         prefix: Tuple[str, ...],
         leaves: Dict[Tuple[str, ...], Any],
     ) -> None:
-        """Add the field leaves of `config_class` (and nested classes) under `prefix`."""
+        """Add the field leaves of `config_class` (and nested ones) under `prefix`."""
         analyzer = FieldAnalyzer(config_class)
         type_hints = get_type_hints(config_class)
         for field_obj in fields(config_class):
+            if not field_obj.init:
+                continue
             info = analyzer._analyze_single_field(field_obj, type_hints)
             path = prefix + (field_obj.name,)
             if info["is_nested_dataclass"]:
@@ -445,8 +568,9 @@ class FieldAnalyzer:
                 f"'{name}' (nargs='{nargs}')" for name, nargs in positional_list_fields
             ]
             raise ConfigBuilderError(
-                f"Only one positional list argument allowed, found {len(positional_list_fields)}: "
-                f"{', '.join(field_names)}. Use optional lists with flags for additional lists:\n"
+                "Only one positional list argument allowed, found "
+                f"{len(positional_list_fields)}: {', '.join(field_names)}. "
+                "Use optional lists with flags for additional lists:\n"
                 f"  Example: field: List[str] = cli_short('f')  # Use --field instead"
             )
 
@@ -485,10 +609,13 @@ class FieldAnalyzer:
                 name for name, _ in positional_fields[list_field_index + 1 :]
             ]
             raise ConfigBuilderError(
-                f"Positional list argument '{list_field_name}' (nargs='{list_nargs}') must be last.\n"
-                f"Found positional argument(s) after it: {', '.join([repr(f) for f in later_fields])}.\n"
+                f"Positional list argument '{list_field_name}' "
+                f"(nargs='{list_nargs}') must be last.\n"
+                "Found positional argument(s) after it: "
+                f"{', '.join(repr(f) for f in later_fields)}.\n"
                 f"Consider making them optional arguments with flags:\n"
-                f"  Example: {later_fields[0]}: str = cli_short('{later_fields[0][0]}', default='value')"
+                f"  Example: {later_fields[0]}: str = "
+                f"cli_short('{later_fields[0][0]}', default='value')"
             )
 
     def _find_positional_list_index(
@@ -553,7 +680,8 @@ class FieldAnalyzer:
         self, config_fields: Dict[str, Dict[str, Any]]
     ) -> None:
         """
-        Validate that there are no field name collisions when flattening nested dataclasses.
+        Validate that there are no field name collisions when flattening nested
+        dataclasses.
 
         Raises:
             ConfigBuilderError: If collisions are detected
@@ -638,7 +766,8 @@ class FieldAnalyzer:
         self, config_fields: Dict[str, Dict[str, Any]]
     ) -> None:
         """
-        Validate that there are no short option collisions when nested fields have no prefix.
+        Validate that there are no short option collisions when nested fields have no
+        prefix.
 
         Short options are only checked for nested fields with empty prefix (prefix="").
         Nested fields with non-empty prefix do not support short options.
@@ -832,7 +961,7 @@ class FieldAnalyzer:
         ancestors: list,
         steps: list,
     ) -> None:
-        """Depth-first walk over nested dataclass fields, tracking the ancestor chain."""
+        """Depth-first walk over nested dataclass fields, tracking the ancestors."""
         for field_name, info in config_fields.items():
             if not info.get("is_nested_dataclass", False):
                 continue

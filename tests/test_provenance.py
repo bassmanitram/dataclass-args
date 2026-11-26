@@ -352,9 +352,9 @@ def test_provenance_with_shallow_mode_raises_before_any_io(entry):
 
 
 def test_non_dict_replaced_by_dict_removes_the_old_leaf():
-    _, prov = prov_from_dict(P, [layer({"db": "x"}, "a"), layer({"db": {"k": 1}}, "b")])
+    _, prov = prov_from_dict(P, [layer({"db": 7}, "a"), layer({"db": {"k": 1}}, "b")])
     assert [(c.path, c.action) for c in prov.changes()] == [("db", "removed")]
-    assert prov.changes()[0].from_value == "x"
+    assert prov.changes()[0].from_value == 7
     assert prov.changes()[0].to_value is MISSING_VALUE
     assert prov.paths() == ["db.k"]
     assert [e.action for e in prov.entries("db")] == ["set", "removed"]
@@ -363,12 +363,12 @@ def test_non_dict_replaced_by_dict_removes_the_old_leaf():
 
 def test_dict_replaced_by_scalar_is_replaced_with_subtree_value():
     _, prov = prov_from_dict(
-        P, [layer({"db": {"a": 1, "b": 2}}, "a"), layer({"db": "plain"}, "b")]
+        P, [layer({"db": {"a": 1, "b": 2}}, "a"), layer({"db": 7}, "b")]
     )
     changes = prov.changes()
     assert (changes[0].path, changes[0].action) == ("db", "replaced")
     assert changes[0].from_value == {"a": 1, "b": 2}
-    assert changes[0].to_value == "plain"
+    assert changes[0].to_value == 7
     assert [(c.path, c.action) for c in changes[1:]] == [
         ("db.a", "removed"),
         ("db.b", "removed"),
@@ -415,7 +415,7 @@ def test_none_over_value_is_cleared_and_value_over_none_is_replaced():
 
 
 def test_empty_dict_marker_removes_a_live_leaf_and_has_no_leaves():
-    _, prov = prov_from_dict(P, [layer({"db": "x"}, "a"), layer({"db": {}}, "b")])
+    _, prov = prov_from_dict(P, [layer({"db": 7}, "a"), layer({"db": {}}, "b")])
     assert prov.paths() == []
     assert [(c.path, c.action) for c in prov.changes()] == [("db", "removed")]
 
@@ -747,10 +747,12 @@ def test_nested_property_override_plus_records_an_append():
     ]
 
 
-def test_nested_cli_scalar_and_non_file_string_are_recorded():
-    _, prov = prov_from_cli(Top, ["--mid-w", "9", "--mid-inner-opts", "plain"])
+def test_nested_cli_scalar_and_dict_file_are_recorded(tmp_path):
+    opts = tmp_path / "opts.json"
+    opts.write_text('{"k": 1}')
+    _, prov = prov_from_cli(Top, ["--mid-w", "9", "--mid-inner-opts", str(opts)])
     assert prov.entries("mid.w") == [ProvenanceEntry("cli", 9, "set")]
-    assert prov.entries("mid.inner.opts") == [ProvenanceEntry("cli", "plain", "set")]
+    assert prov.entries("mid.inner.opts.k") == [ProvenanceEntry("cli", 1, "set")]
 
 
 def test_nested_cli_list_value_is_recorded():
@@ -939,7 +941,7 @@ def test_recorder_never_raises_for_a_build_without_layers():
 
 
 # ---------------------------------------------------------------------------
-# Consistency and the SAF end-to-end scenario
+# Consistency and the layered-policy end-to-end scenario
 # ---------------------------------------------------------------------------
 
 
@@ -976,7 +978,7 @@ def test_every_live_leaf_equals_the_raw_config_after_stage_4(monkeypatch):
         assert node == prov._live[tuple(path.split("."))]
 
 
-def test_SAF_end_to_end_scenario():
+def test_layered_policy_end_to_end_scenario():
     @dataclass
     class Cfg:
         plugins: List[str] = combine_annotations(

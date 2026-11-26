@@ -54,13 +54,17 @@ jobs:
 
     - name: Generate status report
       run: |
-        echo "# Project Status Report" > status-report.md
-        echo "Generated: $(date)" >> status-report.md
-        echo "" >> status-report.md
-        echo "## Test Results" >> status-report.md
+        {
+          echo "# Project Status Report"
+          echo "Generated: $(date)"
+          echo ""
+          echo "## Test Results"
+        } > status-report.md
         pytest tests/ --tb=no -q >> status-report.md 2>&1 || true
-        echo "" >> status-report.md
-        echo "## Package Information" >> status-report.md
+        {
+          echo ""
+          echo "## Package Information"
+        } >> status-report.md
         python -c "
         import dataclass_args
         print(f'Version: {dataclass_args.__version__}')

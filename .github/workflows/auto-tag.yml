@@ -1,0 +1,68 @@
+name: Auto-tag
+
+# Tags a merge to main that bumps the version, then dispatches release.yml.
+# A tag pushed with GITHUB_TOKEN does not trigger `on: push: tags` workflows,
+# but a workflow_dispatch made with GITHUB_TOKEN does. release.yml must stay a
+# top-level workflow: PyPI trusted publishing does not support reusable workflows.
+
+on:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: auto-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Push the release tag
+      actions: write   # Dispatch release.yml
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.workflow_run.head_sha }}
+        fetch-depth: 0
+        fetch-tags: true
+
+    - name: Check whether a release is needed
+      id: check
+      env:
+        HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      run: scripts/release_tag_check.sh "$HEAD_SHA"
+
+    - name: Create and push tag
+      if: steps.check.outputs.tag != ''
+      env:
+        TAG: ${{ steps.check.outputs.tag }}
+        HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git tag -a "$TAG" "$HEAD_SHA" -m "Release ${TAG#v}"
+        git push origin "refs/tags/$TAG"
+
+    - name: Dispatch release
+      if: steps.check.outputs.tag != ''
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.check.outputs.tag }}
+      run: gh workflow run release.yml --ref "$TAG"
+
+    - name: Summary
+      env:
+        TAG: ${{ steps.check.outputs.tag }}
+        REASON: ${{ steps.check.outputs.reason }}
+      run: |
+        if [[ -n "$TAG" ]]; then
+          echo "Tagged $TAG and dispatched release.yml ($REASON)" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No release needed: $REASON" >> "$GITHUB_STEP_SUMMARY"
+        fi

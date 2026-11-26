@@ -449,8 +449,8 @@ class TestRecursiveResolution:
         assert result.storage.path == "/data"
         assert result.storage.readonly is True
 
-    def test_annotation_guided_resolution(self):
-        """Dict resolved because annotation is a non-builtin class type."""
+    def test_plain_dict_not_constructed_from_annotation(self):
+        """A plain dict stays a dict even when the annotation is a class."""
         config = {
             "_target_": f"{FIXTURES}.App",
             "name": "myapp",
@@ -459,21 +459,9 @@ class TestRecursiveResolution:
         result = instantiate(config)
         from tests.test_instantiate_fixtures import Storage
 
-        # storage annotation is Optional[Storage], so dict should be
-        # passed through as Rule 6 (no dispatch keys, and after unwrapping
-        # Optional the type is Storage which IS instantiable)
-        # But instantiate will call itself recursively on the dict...
-        # The nested dict has no _target_ or type key, so it hits Rule 6
-        # and returns as-is. BUT it's guided by annotation — so it should
-        # actually try to instantiate the class...
-        # Wait — looking at the implementation: _resolve_dict_value checks
-        # _is_instantiable_type(annotation) and if True, calls _instantiate_impl
-        # on the nested dict. But the nested dict has no _target_ and no
-        # type+registry, so it hits Rule 6 and returns as-is.
-        # The annotation-guided path calls _instantiate_impl which dispatches
-        # on the DICT, not on the annotation. So it still hits Rule 6.
-        # This is correct behavior — annotation guidance only matters when
-        # the nested dict ALSO has dispatch keys.
+        # A nested dict without a dispatch key is passed as-is (Rule 6),
+        # even though the storage annotation (Optional[Storage]) is a class:
+        # annotations never trigger construction of a plain dict
         assert result.storage == {"path": "/mnt", "readonly": False}
 
     def test_nested_with_dispatch_key_always_resolves(self):
@@ -841,7 +829,7 @@ class TestInputNotMutated:
 
 
 class TestAnnotationGuidedResolution:
-    """Dict resolved because annotation is a non-builtin class type."""
+    """Annotations only matter for string kwargs (registry lookup), never dicts."""
 
     def test_annotation_not_applied_to_builtin_types(self):
         """Dicts for builtin-typed params (str, int, dict) stay as dicts."""

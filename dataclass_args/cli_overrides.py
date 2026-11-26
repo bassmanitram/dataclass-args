@@ -17,12 +17,20 @@ Responsibilities:
 import argparse
 from typing import Any, Dict
 
-from .config_applicator import ConfigApplicator
+from .annotations import is_cli_resolve
+from .config_applicator import ConfigApplicator, InvalidOverrideError
 from .exceptions import ConfigurationError
 from .file_loading import process_file_loadable_value
 from .merge_strategy import MergeContext, combine_dicts
 from .provenance import CLI_LAYER, override_observer
-from .utils import fresh_field_default, load_structured_file, looks_like_structured_file
+from .utils import (
+    DictStringAction,
+    cli_name_to_dest,
+    dict_string_action,
+    fresh_field_default,
+    invalid_dict_string_message,
+    load_structured_file,
+)
 
 
 class CliOverrideProcessor:
@@ -67,7 +75,8 @@ class CliOverrideProcessor:
 
         Note:
             Only processes fields included in the dataclass (not excluded).
-            Handles special cases: lists, dicts, file-loadable fields, property overrides, append actions.
+            Handles special cases: lists, dicts, file-loadable fields, property
+                overrides, append actions.
         """
         # Only process fields that were included in CLI
         # Skip nested dataclass fields (handled by reconstruct_nested_fields)
@@ -102,11 +111,12 @@ class CliOverrideProcessor:
         if info["is_list"]:
             self._apply_list_override(config, field_name, cli_value)
         elif info["is_dict"]:
-            # Dict field without cli_resolve: load from file path (string) or use dict directly
-            self._apply_dict_override(config, field_name, cli_value, ctx)
+            # Dict field (or cli_resolve field): load a file path, or use a dict
+            self._apply_dict_override(config, field_name, info, cli_value, ctx)
             return
         else:
-            # Scalar field OR cli_resolve field: pass through (handles @file, scalars, and resolver inputs)
+            # Scalar field OR cli_resolve field: pass through (handles @file, scalars,
+            # and resolver inputs)
             self._apply_scalar_override(config, field_name, info, cli_value)
         self._record_cli(ctx, field_name, config[field_name])
 
@@ -122,13 +132,15 @@ class CliOverrideProcessor:
         """Apply list override - CLI values replace config values."""
         # CLI values replace config values (standard argparse behavior)
         # With nargs='+' or '*', cli_value is already a list
-        # With action='append', cli_value is a list of sub-lists (if nargs specified) or list of values
+        # With action='append', cli_value is a list of sub-lists (if nargs specified) or
+        # list of values
         config[field_name] = cli_value
 
     def _apply_dict_override(
         self,
         config: Dict[str, Any],
         field_name: str,
+        info: Dict[str, Any],
         cli_value: Any,
         ctx: MergeContext = MergeContext(),
     ) -> None:
@@ -136,39 +148,47 @@ class CliOverrideProcessor:
         Apply dict override - load from file if string, use directly if dict.
 
         A dict (or loaded file) is combined with the existing dict value using
-        the build's merge strategy: one-level (default) or deep.
+        the build's merge strategy: one-level (default) or deep. Any other
+        string is an error for a plain dict field, and passes through for a
+        cli_resolve field (its resolver may accept strings). Values of any
+        other type pass through unchanged.
         """
-        try:
-            if isinstance(cli_value, dict):
-                # Already a dict (programmatic use or a nested route): combined with the existing value below
-                dict_config = cli_value
-            elif isinstance(cli_value, str):
-                # String value - try to load as file, but if looks like non-file string, pass through
-                # Check if it looks like a file path (has common config file extension)
-                if looks_like_structured_file(cli_value):
-                    # Intended as file path - load it (will error if not found)
-                    dict_config = load_structured_file(cli_value)
-                else:
-                    # Plain string value - pass through directly (for resolvers that accept strings)
-                    config[field_name] = cli_value
-                    self._record_cli(ctx, field_name, cli_value)
-                    return
-            else:
-                # Unexpected type - use as-is
-                config[field_name] = cli_value
-                self._record_cli(ctx, field_name, cli_value)
-                return
-
-            # Provenance records what the CLI supplied (the loaded dict), not the merge
+        if isinstance(cli_value, str):
+            action = dict_string_action(cli_value, is_cli_resolve(info))
+            if action == DictStringAction.INVALID:
+                raise ConfigurationError(
+                    invalid_dict_string_message(cli_value, field_name)
+                )
+            dict_config = (
+                self._load_dict_file(field_name, cli_value)
+                if action == DictStringAction.LOAD
+                else cli_value
+            )
+        else:
+            dict_config = cli_value
+        if not isinstance(dict_config, dict):
+            # A cli_resolve string, or a value of any other type: used as given
+            config[field_name] = dict_config
             self._record_cli(ctx, field_name, dict_config)
-            existing = config.get(field_name, {})
-            if isinstance(existing, dict):
-                config[field_name] = combine_dicts(existing, dict_config, ctx)
-            else:
-                config[field_name] = dict_config
+            return
+
+        # Provenance records what the CLI supplied (the loaded dict), not the merge
+        self._record_cli(ctx, field_name, dict_config)
+        existing = config.get(field_name, {})
+        if isinstance(existing, dict):
+            config[field_name] = combine_dicts(existing, dict_config, ctx)
+        else:
+            config[field_name] = dict_config
+
+    @staticmethod
+    def _load_dict_file(field_name: str, path: str) -> Dict[str, Any]:
+        """Load a dict field's file, wrapping failures with the field name."""
+        try:
+            return load_structured_file(path)
         except Exception as e:
             raise ConfigurationError(
-                f"Failed to load dictionary config for field '{field_name}' from {cli_value}: {e}"
+                f"Failed to load dictionary config for field '{field_name}' "
+                f"from {path}: {e}"
             ) from e
 
     def _apply_scalar_override(
@@ -220,8 +240,7 @@ class CliOverrideProcessor:
         if not info["is_dict"]:
             return
 
-        override_arg_name = info["override_name"][2:].replace("-", "_")
-        override_value = getattr(args, override_arg_name, None)
+        override_value = getattr(args, cli_name_to_dest(info["override_name"]), None)
         if not override_value:
             return
 
@@ -240,6 +259,10 @@ class CliOverrideProcessor:
 
         try:
             ConfigApplicator.apply_property_overrides(target, override_value, observer)
+        except InvalidOverrideError as e:
+            raise ConfigurationError(
+                e.describe(field_name, info["override_name"], info["cli_name"])
+            ) from e
         except Exception as e:
             raise ConfigurationError(
                 f"Failed to apply property overrides for field '{field_name}': {e}"

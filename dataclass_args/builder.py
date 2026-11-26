@@ -168,9 +168,11 @@ class GenericConfigBuilder:
         return_provenance: bool = False,
     ) -> Any:
         """
-        Build dataclass instance from parsed CLI arguments (delegates to ConfigResolver).
+        Build dataclass instance from parsed CLI arguments (delegates to
+        ConfigResolver).
 
-        Configuration sources are merged in the following order (later sources override earlier):
+        Configuration sources are merged in the following order (later sources override
+        earlier):
         1. Programmatic base_configs (if provided) - files loaded and applied in order
         2. Config file from --config argument (if provided)
         3. CLI argument overrides
@@ -178,12 +180,14 @@ class GenericConfigBuilder:
         Args:
             args: Parsed CLI arguments from argparse
             base_config_name: Name of the base config file argument.
-                             If None (default), uses the name registered in add_arguments().
+                             If None (default), uses the name registered in
+                             add_arguments().
             base_configs: Optional base configuration(s) to apply before --config file.
                          Can be:
                          - str: Path to a single config file
                          - dict: A single configuration dictionary
-                         - List[Union[str, dict]]: Multiple configs (files and/or dicts) applied in order
+                         - List[Union[str, dict]]: Multiple configs (files and/or dicts)
+                           applied in order
             merge_strategy: How dicts from different sources are merged:
                            "shallow" (default, one level) or "deep" (recursive)
             return_provenance: If True (requires merge_strategy="deep"), return

@@ -1,10 +1,10 @@
 """
 Configuration merging: normalize and merge base_configs + config files.
 
-This module handles the first two stages of the config resolution pipeline:
+This module handles the first three stages of the config resolution pipeline:
     1. Normalize base_configs → List[Dict]  (files loaded, types validated)
-    2. Apply base_configs → merged Dict      (one-level (default) or deep merge in order)
-    3. Apply config file → merged Dict       (--config file merged on top, same strategy)
+    2. Apply base_configs → merged Dict     (one-level or deep merge, in order)
+    3. Apply config file → merged Dict      (merged on top, same strategy)
 
 Precedence (later wins):
     base_configs[0] < base_configs[1] < ... < --config file
@@ -58,7 +58,8 @@ class ConfigLayer:
             )
         if self.name is not None and (not isinstance(self.name, str) or not self.name):
             raise ConfigBuilderError(
-                f"ConfigLayer name must be a non-empty string or None, got {self.name!r}"
+                "ConfigLayer name must be a non-empty string or None, "
+                f"got {self.name!r}"
             )
 
 
@@ -145,7 +146,8 @@ class ConfigMerger:
             return [self._normalize_labeled_item(base_configs, None, "base_configs")]
 
         raise ConfigurationError(
-            f"base_configs must be str, dict, or list, got {type(base_configs).__name__}"
+            "base_configs must be str, dict, ConfigLayer, or list, "
+            f"got {type(base_configs).__name__}"
         )
 
     def _normalize_labeled_item(

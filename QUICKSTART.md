@@ -5,7 +5,8 @@ Get started with dataclass-args in 5 minutes.
 ## Installation
 
 ```bash
-pip install dataclass-args
+pip install dataclass-args            # Python 3.11+
+pip install "dataclass-args[yaml]"    # optional: YAML config files (JSON and TOML are built in)
 ```
 
 ## 1. Basic Usage
@@ -156,16 +157,26 @@ $ python app.py input.txt -n myapp -e prod -d
 
 # Help is automatically generated
 $ python app.py --help
+usage: app.py [-h] [--config CONFIG] [-n NAME] [-e {dev,staging,prod}]
+              [-d] [--no-debug]
+              INPUT_FILE
+
+Build Config from CLI
+
 positional arguments:
-  input_file            Input file to process
+  INPUT_FILE            Input file to process
 
 options:
+  -h, --help            show this help message and exit
+  --config CONFIG       Base configuration file (JSON, YAML, or TOML)
   -n NAME, --name NAME  Application name
   -e {dev,staging,prod}, --environment {dev,staging,prod}
-                        Deployment environment (default: dev)
+                        Deployment environment (choices: dev, staging, prod)
   -d, --debug           Enable debug mode (default: False)
-  --no-debug            Disable Enable debug mode
+  --no-debug            Disable --debug
 ```
+
+(Python 3.13+ prints short options without repeating the metavar: `-n, --name NAME`.)
 
 ## Complete Example
 
@@ -349,10 +360,10 @@ $ python build.py -p myapp -d -v                # Deploy with verbose
 ✅ **Positional arguments** for required inputs
 ✅ **Boolean flags** with `--flag` and `--no-flag`
 ✅ **Value validation** with `cli_choices()`
-✅ **Type-safe** parsing for all Python types
+✅ **Type-aware** parsing for standard types (`str`, `int`, `float`, `bool`, lists of these, `Optional`)
 ✅ **Combine features** with `combine_annotations()`
 ✅ **File loading** with `@filename` syntax
-✅ **Configuration files** (JSON, YAML, TOML)
+✅ **Configuration files** (JSON and TOML built in; YAML with the `[yaml]` extra), merged in layers with `--config` and `base_configs`
 
 That's it! You now know enough to build powerful CLIs with dataclass-args. 🚀
 

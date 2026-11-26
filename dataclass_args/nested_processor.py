@@ -11,21 +11,27 @@ import argparse
 from dataclasses import MISSING, fields, is_dataclass
 from typing import Any, Dict, Tuple
 
-from .config_applicator import ConfigApplicator
+from .annotations import is_cli_resolve
+from .config_applicator import ConfigApplicator, InvalidOverrideError
 from .exceptions import ConfigBuilderError, ConfigurationError
 from .file_loading import process_file_loadable_value
 from .merge_strategy import MergeContext, combine_dicts
 from .provenance import CLI_LAYER, override_observer
 from .utils import (
+    DictStringAction,
+    cli_name_to_dest,
     copy_containers,
+    describe_missing,
+    dict_string_action,
     fresh_field_default,
+    invalid_dict_string_message,
     load_structured_file,
-    looks_like_structured_file,
+    missing_required_fields,
 )
 
 
 def mapping_source(mapping: Dict[str, Any]) -> str:
-    """Describe where a flat-field mapping comes from, as a dotted path (``mid.inner.v``)."""
+    """Describe where a flat-field mapping comes from (dotted: ``mid.inner.v``)."""
     if mapping.get("path"):
         return ".".join(mapping["path"])
     if mapping.get("parent_field"):
@@ -179,7 +185,8 @@ class NestedFieldProcessor:
                 f"  {cli_name}\n"
                 f"    - {source1}\n"
                 f"    - {field_name}\n\n"
-                f"This should not happen with non-nested fields. Please report this bug."
+                "This should not happen with non-nested fields. "
+                "Please report this bug."
             )
 
         flat_fields[cli_name] = {
@@ -243,9 +250,8 @@ class NestedFieldProcessor:
         nested_field = mapping["nested_field"]
         nested_info = mapping["nested_info"]
 
-        # Convert CLI name to arg name
-        arg_name = cli_name.lstrip("-").replace("-", "_")
-        cli_value = getattr(args, arg_name, None)
+        # Read the value back from the dest the registry gave this option
+        cli_value = getattr(args, cli_name_to_dest(cli_name), None)
 
         # The tree node holding the leaf's siblings
         parent_data = self._tree_node(nested_data, path[:-1])
@@ -289,7 +295,7 @@ class NestedFieldProcessor:
             self._record_cli(ctx, path, cli_value)
         elif nested_info["is_dict"]:
             self._process_dict_cli_value(
-                parent_data, nested_field, cli_value, path, config, ctx
+                parent_data, nested_field, nested_info, cli_value, path, config, ctx
             )
         else:
             # Process file-loadable values
@@ -314,6 +320,7 @@ class NestedFieldProcessor:
         self,
         parent_data: Dict,
         nested_field: str,
+        nested_info: Dict[str, Any],
         cli_value: Any,
         path: Tuple[str, ...],
         config: Dict[str, Any],
@@ -324,13 +331,12 @@ class NestedFieldProcessor:
 
         A structured-file path or a dict is combined with the layer value
         (never with the dataclass default) using the build's merge strategy:
-        one-level (default) or deep. Anything else passes through.
+        one-level (default) or deep. Any other string is an error for a plain
+        dict field and passes through for a cli_resolve field; other values
+        pass through.
         """
-        if isinstance(cli_value, dict):
-            loaded = copy_containers(cli_value)
-        elif isinstance(cli_value, str) and looks_like_structured_file(cli_value):
-            loaded = self._load_nested_dict_file(cli_value, path)
-        else:
+        loaded = self._dict_cli_value_as_dict(cli_value, nested_info, path)
+        if loaded is None:
             parent_data[nested_field] = cli_value
             self._record_cli(ctx, path, cli_value)
             return
@@ -344,6 +350,29 @@ class NestedFieldProcessor:
             )
         else:
             parent_data[nested_field] = loaded
+
+    def _dict_cli_value_as_dict(
+        self, cli_value: Any, nested_info: Dict[str, Any], path: Tuple[str, ...]
+    ) -> Any:
+        """
+        Return the dict a CLI value stands for, or None if it passes through.
+
+        Raises:
+            ConfigurationError: For a string that can't be a plain dict
+                field's value, or a file that can't be loaded
+        """
+        if isinstance(cli_value, dict):
+            return copy_containers(cli_value)
+        if not isinstance(cli_value, str):
+            return None
+        action = dict_string_action(cli_value, is_cli_resolve(nested_info))
+        if action == DictStringAction.INVALID:
+            raise ConfigurationError(
+                invalid_dict_string_message(cli_value, ".".join(path))
+            )
+        if action == DictStringAction.LOAD:
+            return self._load_nested_dict_file(cli_value, path)
+        return None
 
     @staticmethod
     def _load_nested_dict_file(path_str: str, path: Tuple[str, ...]) -> Dict[str, Any]:
@@ -402,36 +431,35 @@ class NestedFieldProcessor:
         ctx: MergeContext = MergeContext(),
     ) -> None:
         """Process property overrides for dict fields."""
-        # Get override argument name with the composed prefix
-        base_override = nested_info.get("override_name", "").lstrip("--")
-        prefix = mapping.get("prefix", "")
+        if not nested_info.get("override_name", ""):
+            return
+        # Local import: field_analyzer imports this module
+        from .field_analyzer import compose_override_name
 
-        if base_override:
-            # Apply prefix if present
-            if prefix:
-                override_arg_name = f"{prefix}{base_override}".replace("-", "_")
-            else:
-                override_arg_name = base_override.replace("-", "_")
+        # Override option with the composed prefix, read back from its dest
+        override = compose_override_name(nested_info, mapping.get("prefix", ""))
+        override_value = getattr(args, cli_name_to_dest(override), None)
+        if not override_value:
+            return
 
-            override_value = getattr(args, override_arg_name, None)
-            if override_value:
-                path = mapping["path"]
-                target = self._override_target(
-                    parent_data, nested_field, nested_info, path, config
-                )
-
-                # Apply property overrides
-                observer = override_observer(ctx, path, target)
-                try:
-                    ConfigApplicator.apply_property_overrides(
-                        target, override_value, observer
-                    )
-                except Exception as e:
-                    raise ConfigurationError(
-                        f"Failed to apply property overrides for nested field "
-                        f"'{'.'.join(path)}': {e}"
-                    ) from e
-                parent_data[nested_field] = target
+        path = mapping["path"]
+        target = self._override_target(
+            parent_data, nested_field, nested_info, path, config
+        )
+        observer = override_observer(ctx, path, target)
+        try:
+            ConfigApplicator.apply_property_overrides(target, override_value, observer)
+        except InvalidOverrideError as e:
+            file_option = self._build_flat_cli_name(nested_field, mapping["prefix"])
+            raise ConfigurationError(
+                e.describe(".".join(path), override, file_option)
+            ) from e
+        except Exception as e:
+            raise ConfigurationError(
+                f"Failed to apply property overrides for nested field "
+                f"'{'.'.join(path)}': {e}"
+            ) from e
+        parent_data[nested_field] = target
 
     def _override_target(
         self,
@@ -498,6 +526,12 @@ class NestedFieldProcessor:
             elif name in cli_subtree:
                 values[name] = cli_subtree[name]
 
+        missing = missing_required_fields(nested_class, values)
+        if missing:
+            raise ConfigurationError(
+                f"Failed to create nested dataclass {nested_class.__name__} "
+                f"for field '{dotted}': {describe_missing(missing)}"
+            )
         try:
             return nested_class(**values)
         except Exception as e:

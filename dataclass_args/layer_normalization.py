@@ -1,5 +1,5 @@
 """
-Layer normalization: resolve dict-field file references when a layer enters the pipeline.
+Layer normalization: prepare each configuration layer as it enters the pipeline.
 
 A layer is one dict entering the pipeline (a base_configs item, the --config
 file dict, or the internal layer built by build_config_from_dict). Normalizing
@@ -11,13 +11,20 @@ rejected instead of silently discarded.
 from dataclasses import dataclass, fields
 from typing import Any, Dict, FrozenSet
 
+from .annotations import is_cli_resolve
 from .exceptions import ConfigurationError
-from .utils import copy_containers, load_structured_file, looks_like_structured_file
+from .utils import (
+    DictStringAction,
+    copy_containers,
+    dict_string_action,
+    invalid_dict_string_message,
+    load_structured_file,
+)
 
 
 @dataclass(frozen=True)
 class _Schema:
-    """Schema for one dataclass level: all its field names, and the fields to normalize."""
+    """Schema for one dataclass level: its field names and the fields to normalize."""
 
     names: FrozenSet[str]
     entries: Dict[str, Any]
@@ -31,14 +38,15 @@ class _NestedSchema:
     schema: _Schema
 
 
-# Marker stored in a schema for a dict field
+# Markers stored in a schema for a plain dict field and a cli_resolve dict field
 _DICT_FIELD = object()
+_RESOLVED_DICT_FIELD = object()
 
 
 def _field_name_aliases(
     layer: Dict[str, Any], field_names: FrozenSet[str]
 ) -> Dict[str, str]:
-    """Map each hyphenated key whose underscore spelling is a field name to that spelling."""
+    """Map each hyphenated key whose underscore spelling is a field name to it."""
     return {
         key: key.replace("-", "_")
         for key in layer
@@ -141,7 +149,9 @@ class LayerNormalizer:
                     LayerNormalizer._build_schema(nested_fields, nested_class),
                 )
             elif info.get("is_dict", False):
-                entries[field_name] = _DICT_FIELD
+                entries[field_name] = (
+                    _RESOLVED_DICT_FIELD if is_cli_resolve(info) else _DICT_FIELD
+                )
         return _Schema(frozenset(f.name for f in fields(config_class)), entries)
 
     def normalize(self, layer: Dict[str, Any], label: str) -> Dict[str, Any]:
@@ -178,8 +188,10 @@ class LayerNormalizer:
             if key not in layer:
                 continue
             dotted = f"{prefix}{key}"
-            if entry is _DICT_FIELD:
-                layer[key] = self._load_dict_field(layer[key], dotted, label)
+            if entry is _DICT_FIELD or entry is _RESOLVED_DICT_FIELD:
+                layer[key] = self._load_dict_field(
+                    layer[key], dotted, label, entry is _RESOLVED_DICT_FIELD
+                )
             else:
                 layer[key] = self._normalize_nested(layer[key], entry, label, dotted)
         return layer
@@ -208,7 +220,7 @@ class LayerNormalizer:
 
     @staticmethod
     def _instance_to_dict(instance: Any, nested_class: type) -> Dict[str, Any]:
-        """Return the init=True fields of `instance` (per the declared class), copied."""
+        """Return the init=True fields of `instance` (per the declared class)."""
         return {
             f.name: copy_containers(getattr(instance, f.name))
             for f in fields(nested_class)
@@ -216,9 +228,19 @@ class LayerNormalizer:
         }
 
     @staticmethod
-    def _load_dict_field(value: Any, dotted: str, label: str) -> Any:
-        """Load a structured-file reference; return any other value unchanged."""
-        if not isinstance(value, str) or not looks_like_structured_file(value):
+    def _load_dict_field(value: Any, dotted: str, label: str, resolved: bool) -> Any:
+        """
+        Return a dict field's layer value, loading a file the string names.
+
+        Any other string is invalid for a plain dict field and kept for a
+        cli_resolve field; values of other types are returned unchanged.
+        """
+        if not isinstance(value, str):
+            return value
+        action = dict_string_action(value, resolved)
+        if action == DictStringAction.INVALID:
+            raise ConfigurationError(invalid_dict_string_message(value, dotted, label))
+        if action != DictStringAction.LOAD:
             return value
         try:
             return load_structured_file(value)

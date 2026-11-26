@@ -257,9 +257,11 @@ class Config:
 **Help Output:**
 ```
 options:
-  --host HOST    Server bind address (default: localhost)
-  --port PORT    Server port number (default: 8000)
+  --host HOST    Server bind address
+  --port PORT    Server port number
 ```
+
+Only boolean flags show their default in help ("(default: False)"); other fields show the help text as given.
 
 ---
 
@@ -284,7 +286,7 @@ Each occurrence of the option collects its arguments, and all occurrences accumu
   - Must be used together with `min_args`
   - Enables clean help text display
 - `metavar` (Optional[str]): Custom display name for arguments in help text
-- `**kwargs`: Field parameters including `default_factory` (required)
+- `**kwargs`: Field parameters; `default_factory=list` is recommended, so an unset field is `[]` rather than a required argument
 
 **Returns:**
 - `Field` with append action metadata
@@ -436,7 +438,7 @@ class Process:
 # Exact count
 @dataclass
 class Point:
-    coordinates: List[float] = cli_positional(nargs=2, metavar='X Y', help="Coordinates")
+    coordinates: List[float] = cli_positional(nargs=2, metavar='COORD', help="Coordinates")  # usage: COORD COORD
 
 # CLI: python plot.py 3.5 7.2
 ```
@@ -448,7 +450,7 @@ class Point:
 
 ---
 
-### `cli_nested(prefix=None, default_factory=None, **kwargs)`
+### `cli_nested(prefix=None, **kwargs)`
 
 Mark a dataclass field as a nested configuration that should be flattened into CLI arguments.
 
@@ -600,7 +602,7 @@ After the raw value is assembled from all configuration sources (base_configs, c
 - `ConfigurationError` raised by resolver is re-raised without double-wrapping
 
 **Compatibility:**
-- Works with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `combine_annotations`
+- Works with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `cli_extend` (list fields), `combine_annotations`
 - Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - In nested dataclasses: allowed but resolver NOT called (value stays raw; application resolves explicitly)
 
@@ -745,7 +747,7 @@ class Config:
 
 ### `cli_include(**kwargs)`
 
-Explicitly mark a dataclass field to be included in CLI arguments. Useful when using custom field filters.
+Explicitly mark a dataclass field as included in CLI arguments. Fields are included by default, so this is a documentation-only marker with no effect on behaviour.
 
 **Parameters:**
 - `**kwargs`: Field parameters (e.g., `default`, `default_factory`)
@@ -837,7 +839,30 @@ skills: Dict[str, Any] = combine_annotations(
   - a field that's neither a list nor a dict;
   - a `cli_nested` field. Annotate the nested class's own fields instead; rules apply at any depth.
 
-**Compatible with:** `cli_resolve`, `cli_append`, `cli_help`, `cli_short`, `cli_positional`, `cli_exclude`. No CLI arguments are added.
+**Compatible with:** `cli_resolve`, `cli_append`, `cli_extend`, `cli_help`, `cli_short`, `cli_positional`, `cli_exclude`. No CLI arguments are added.
+
+---
+
+### `cli_extend(**kwargs)`
+
+Makes a `List[T]` / `Optional[List[T]]` option **repeatable**. Every occurrence's values are appended to one flat list (argparse `action="extend"`). Without it, a repeated list flag keeps only its last occurrence.
+
+```python
+paths: List[str] = combine_annotations(cli_short("p"), cli_extend(), default_factory=list)
+# -p a -p b       → ['a', 'b']
+# -p a b -p c     → ['a', 'b', 'c']
+```
+
+- **When the flag is omitted:** earlier sources and the dataclass default keep their value.
+- **When it's given:** the accumulated CLI list replaces earlier sources as a whole. It's never appended to a default or to a config value.
+- **Values:** element types are converted, and `cli_choices` is checked for every value. `Optional[List[T]]` with no values yields `[]`.
+- **Nesting:** works in nested dataclasses at any depth.
+- **Help suffix:** "(specify one or more values; repeatable)", or "zero or more" for Optional.
+- **Raises `ConfigBuilderError`** (when the builder is constructed) on:
+  - a non-list field;
+  - a list with non-scalar elements (lists, tuples, sets, dicts, dataclasses). The message names the element type, and suggests `cli_append(nargs=…)` for a list of lists. Unions and `Optional`s of scalars (`List[Union[str, Path]]`, `list[str | Path]`) are accepted;
+  - combination with `cli_append`, `cli_positional` or `cli_exclude`.
+- **Compatible with:** `cli_short`, `cli_help`, `cli_choices`, `cli_resolve` (the resolver receives the final list), `cli_list_merge` (which applies between config sources, never to CLI values).
 
 ---
 
@@ -901,7 +926,7 @@ Supports:
 - Object parameter file loading with property overrides
 - File-loadable string parameters via '@' prefix
 - Hierarchical merging of configuration sources
-- Field filtering via annotations or custom filters
+- Field filtering via annotations (`cli_exclude`)
 
 **Constructor Parameters:**
 - `config_class` (Type[dataclass]): Dataclass type to build configurations for
@@ -962,13 +987,13 @@ config = builder.build_config(args)
 | `int` | Parsed as integer | `--count 42` | `42` |
 | `float` | Parsed as float | `--rate 3.14` | `3.14` |
 | `bool` | Boolean flag | `--debug` or `--no-debug` | `True` or `False` |
-| `List[str]` | Multiple string values | `--tags a b c` | `["a", "b", "c"]` |
+| `List[str]` | Multiple string values (one flag; repeat with `cli_extend`) | `--tags a b c` | `["a", "b", "c"]` |
 | `List[int]` | Multiple integer values | `--ids 1 2 3` | `[1, 2, 3]` |
 | `List[float]` | Multiple float values | `--values 1.5 2.5` | `[1.5, 2.5]` |
-| `Dict[str, Any]` | JSON/config file or key:value | `--config file.json` or `--c k:v` | `{...}` |
+| `Dict[str, Any]` | Dict or structured file, plus key:value overrides | `--model-config m.json` or `--mc k:v` | `{...}` |
 | `Optional[T]` | Optional parameter | `--timeout 30` or omit | `30` or `None` |
-| `Path` | File path | `--output /tmp/file` | `Path('/tmp/file')` |
-| `Enum` | Enum member (by value) | `--status active` | `Status.ACTIVE` |
+| `Path` | File path (passed through as typed; not converted) | `--output /tmp/file` | `'/tmp/file'` (str) |
+| `Enum` | Value as typed (not converted to the member) | `--status active` | `'active'` (str) |
 
 ### Type Examples
 
@@ -1048,23 +1073,21 @@ except ConfigBuilderError as e:
 
 ### `ConfigurationError`
 
-Exception raised for configuration validation errors.
+Raised for problems with configuration *values*: anything detected while loading and combining sources, or while building the instance.
 
 **Raised when:**
-- Invalid configuration values
-- Type conversion failures
-- Validation errors
+- A config file can't be found or read, or doesn't contain a mapping at its top level
+- A value is invalid for its field: e.g. a string for a dict field that isn't an existing file, a property override on a non-dict value, or an `append` value with the wrong number of arguments
+- A required field has no value from any source ("missing required field: 'name'")
+- `cli_resolve` resolvers or `__post_init__` raise
+
+Invalid **command-line** values (a bad `int`, an invalid choice) are reported by argparse as a usage error (`SystemExit(2)`). Values from config sources aren't type-converted.
 
 ---
 
 ### `FileLoadingError`
 
-Exception raised when file loading fails.
-
-**Raised when:**
-- File not found
-- File read errors
-- Invalid file format
+Raised by `load_file_content()` (the `@file` loader) when a file can't be found or read. During a build, these errors are reported as `ConfigurationError`, with the field named.
 
 ---
 
@@ -1122,10 +1145,11 @@ Automatically detects file format based on extension and attempts to parse.
 - `file_path` (str): Path to the file
 
 **Returns:**
-- `dict`: Parsed file content
+- `dict`: Parsed file content. An empty YAML file gives `{}`.
 
 **Raises:**
-- `FileLoadingError`: If file cannot be loaded or parsed
+- `FileNotFoundError`: the file doesn't exist (`~` is expanded first)
+- `ValueError`: the content can't be parsed, or its top level isn't a mapping
 
 **Supported Formats:**
 - `.json` - JSON files
@@ -1178,7 +1202,7 @@ Construct a Python object from a configuration value using convention-based disp
 - `target_key` (str): Dict key indicating a direct import path. Default: `"_target_"`
 - `type_key` (str): Dict key indicating a registry lookup name. Default: `"type"`
 - `attr_key` (Optional[str]): Dict key indicating post-construction attribute traversal. Set to `None` to disable. Default: `"_attr_"`
-- `recursive` (bool): Whether to recursively resolve nested dicts in kwargs based on `__init__` type annotations. Default: `True`
+- `recursive` (bool): Whether to recursively instantiate nested dicts and list elements that carry a dispatch key (`_target_`, or `type` with a registry). Plain dicts are passed through unchanged. Default: `True`
 - `max_depth` (int): Maximum recursion depth to prevent infinite loops. Default: `10`
 
 **Returns:**
@@ -1245,7 +1269,7 @@ engine = instantiate(config)
 
 **Recursive Resolution:**
 
-Nested dicts are recursively resolved based on the target class's `__init__` type annotations:
+Nested dicts that carry a dispatch key are instantiated recursively. A nested dict without one is passed to the constructor as a plain dict:
 
 ```python
 config = {
@@ -1295,7 +1319,7 @@ Configuration files can be loaded using the `--config` option (automatically add
 **Supported Formats:**
 - JSON (built-in)
 - YAML (requires `pip install "dataclass-args[yaml]"`)
-- TOML (requires `pip install "dataclass-args[toml]"`)
+- TOML (built in via the standard library's `tomllib`)
 
 **Example:**
 
@@ -1358,17 +1382,14 @@ class DatabaseConfig:
 class AppConfig:
     name: str
     debug: bool = False
-    database: Dict[str, Any] = None  # Load from config file
+    database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
 
-config = build_config(AppConfig, args=[
-    '--name', 'myapp',
-    '--database', 'db_config.json'
-])
-
-# Convert dict to dataclass
-if config.database:
-    db_config = DatabaseConfig(**config.database)
+config = build_config(AppConfig, args=['--name', 'myapp', '--config', 'app.yaml', '--db-port', '6543'])
+# config.database is a DatabaseConfig instance: values come from app.yaml's
+# "database" section, overridden by --db-port. No manual conversion needed.
 ```
+
+See [`cli_nested`](#cli_nestedprefixnone-kwargs) for prefixes, short options and nesting at any depth.
 
 ### Environment Variable Integration
 
@@ -1379,7 +1400,7 @@ import os
 
 @dataclass
 class Config:
-    api_key: str = os.getenv('API_KEY', '')
+    api_key: str = field(default_factory=lambda: os.getenv('API_KEY', ''))  # read at build time, not import time
     port: int = cli_short('p', default=8000)
 
     def __post_init__(self):

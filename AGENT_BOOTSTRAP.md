@@ -55,7 +55,7 @@ dataclass_args/
 ├── utils.py                # load_structured_file, deep_merge, copy_containers, fresh_field_default
 ├── instantiate.py          # instantiate() - object construction from config
 └── exceptions.py           # ConfigBuilderError (programming errors) / ConfigurationError (config errors)
-tests/                      # 1234 tests, ~98% coverage, Python 3.11–3.14
+tests/                      # 1399 tests, ~98% coverage, Python 3.11–3.14
 ```
 
 **Navigation Guide**:
@@ -100,7 +100,7 @@ These rules MUST be maintained:
 4. **Nested field collision detection**: No duplicate CLI names from flattened nested fields
    - **Why**: Ambiguous which field gets the value (e.g., `app.name` vs `db.name` both become `--name`)
    - **Breaks if violated**: `ConfigBuilderError` with collision details
-   - **Enforced by**: `NestedFieldProcessor._check_collision()` during flattening (all depths), short-option and override-name checks in `FieldAnalyzer`, and a final whole-parser plan in `option_collisions.py` (run by `add_arguments` before anything is registered) that also covers `-h/--help`, the `--config` option, `--no-` flags and dict override options
+   - **Enforced by**: `NestedFieldProcessor._check_collision()` during flattening (all depths), short-option and override-name checks in `FieldAnalyzer`, and a final whole-parser plan in `option_collisions.py` (run by `add_arguments` before anything is registered) that also covers `-h/--help`, the `--config` option, `--no-` flags and dict override options. A second check (`check_dest_collisions`) rejects two arguments sharing one Namespace attribute; every argument is registered with an explicit `dest` (`utils.cli_name_to_dest`), so names like `_count` (`---count`) read back correctly
 
 5. **Caller data is never mutated or aliased**: every layer is copied at intake (`copy_containers`: dicts/lists at every depth; other objects by reference)
    - **Breaks if violated**: property overrides/appends write into the caller's dicts; the instance holds caller objects
@@ -115,10 +115,11 @@ These rules MUST be maintained:
 
 Things that surprise people:
 
-1. **List fields without cli_append accumulate from single flag**:
+1. **List fields take all values from a single flag; repeats keep the last occurrence** unless `cli_extend()` (flat accumulate) or `cli_append()` (one entry per occurrence):
    - **Why it's this way**: `--files a b c` puts all three in list (argparse default)
-   - **Common mistake**: Expecting `--files a --files b` to work (it doesn't without cli_append)
-   - **Correct approach**: Use `cli_append()` if you want `--files a --files b` pattern
+   - **Common mistake**: Expecting `--files a --files b` to give both (it silently keeps only `['b']`)
+   - **Correct approach**: `cli_extend()` for one flat list (`['a', 'b']`), `cli_append()` for one entry per occurrence
+   - **Element types** are converted for `int`/`float`/`str` lists (v1.10.1); `Path`/`Enum` CLI values stay strings by design (for now)
 
 2. **Boolean fields from base_configs work differently than CLI**:
    - **Why**: argparse uses `SUPPRESS` to distinguish "not specified" from "specified as False"
@@ -138,7 +139,8 @@ Things that surprise people:
 5. **Short options disabled for nested fields with prefix** (v1.4.0):
    - **Why**: Prevents ambiguity - `--db-host` is clear, `-d` could be many things
    - **Pattern**: Short options only work when `prefix=""`  (flat namespace)
-   - **Gotcha**: Top-level fields still get short options, just not nested ones with prefix
+   - **Gotcha**: Top-level fields still get short options, just not nested ones with prefix. This applies to booleans too, so one dataclass can be nested under two prefixes
+   - **Override**: Use `prefix="custom"` or `prefix=""` (flat) to control
 
 6. **Auto prefix uses field name** (v1.4.0):
    - **Why**: `cli_nested()` without prefix uses field name as prefix
@@ -149,7 +151,6 @@ Things that surprise people:
    - **Common mistake**: Expecting the field to accept complex types directly on CLI
    - **Pattern**: For non-list fields, library forces `is_dict=True`; for list fields, keeps list behavior. Resolver runs after assembly
    - **Gotcha**: Property overrides work (modify dict before resolution) but fail on pre-built objects
-   - **Override**: Use `prefix="custom"` or `prefix=""` (flat) to control
 
 8. **Shallow merge is one level, everywhere** (v1.10.0):
    - **Watch out for**: `{'db': {'opts': {'x':1}}}` then `{'db': {'opts': {'y':2}}}` → `opts == {'y':2}` (nested dict replaced). Use `merge_strategy="deep"` for recursive merging
@@ -162,6 +163,10 @@ Things that surprise people:
 11. **Provenance records raw values** (v1.10.0): after file loading, before `@file`/`cli_resolve`. Only paths a source actually supplied are recorded; `source()` returns `"default"` only for unset dataclass field leaves
 
 12. **List rules never fire for CLI values or the `--config` file**: only stage-2 layers with `list_merge="rules"` (and the `build_config_from_dict` config with `config_list_merge="rules"`)
+
+13. **A string for a plain dict field is a file path or an error** (v1.10.1): from any source (CLI, nested CLI, every layer), an existing file of any extension is loaded like `--config`; a missing `.json/.yaml/.yml/.toml` path is "not found"; anything else raises. Only `cli_resolve` fields receive other strings. One helper implements this for all entry points.
+
+14. **CLI option names are frozen until a minor release**: nested prefixes keep underscores in positive options (`--primary_db-host`) while negative flags hyphenate (`--no-primary-db-ssl`). Hyphenation is recorded in `FUTURE_CHANGES.md`; don't "fix" it in a patch release. The help-snapshot gate catches accidental renames.
 
 ---
 
@@ -248,9 +253,7 @@ validate merge_strategy / rules / provenance options           (before any I/O)
 - **PyYAML** (optional): YAML loading, loosely coupled (via utils.py)
 
 **Projects that depend on this** (downstream):
-- **strands-agent-factory**: Uses dataclass-args for CLI scripts (chatbot, a2a-server)
-- **yacba**: Uses dataclass-args for configuration CLI generation
-- **Your CLI applications**: Configuration and argument parsing
+- **CLI applications and agent frameworks**: configuration and argument parsing, including layered configuration (defaults, user config, mandatory overrides) with provenance
 
 **Related projects** (siblings):
 - **profile-config**: File-based config vs dataclass-args' CLI args - often used together
@@ -324,6 +327,7 @@ validate merge_strategy / rules / provenance options           (before any I/O)
 **Symptom**: Short options not working for nested fields (v1.4.0)
 - **Why it happens**: Short options disabled when prefix is set (by design)
 - **Diagnostic**: Check if nested field uses `prefix=""` (flat namespace)
+- **Solution**: Use `prefix=""` to enable short options, or accept long options only
 
 **Symptom**: "cli_resolve cannot be combined with..." error (v1.5.0)
 - **Likely cause**: Using `cli_resolve` together with `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, or `cli_file_loadable`
@@ -334,7 +338,6 @@ validate merge_strategy / rules / provenance options           (before any I/O)
 - **Likely cause**: Pre-built object in base_configs + CLI property overrides on same field
 - **Diagnostic**: Check if base_configs provides an already-instantiated object AND CLI uses `--abbreviation key:value`
 - **Solution**: Remove pre-built object from base_configs, or don't use property overrides for that field
-- **Solution**: Use `prefix=""` to enable short options, or accept long options only
 
 ---
 
