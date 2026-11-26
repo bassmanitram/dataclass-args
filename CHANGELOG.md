@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.10.1] - 2026-11-25
+
+### Fixed
+- **Repeated list flags silently dropped earlier values.** With a plain `List[T]` option, `-t a -t b` kept only `['b']`, while the help text ("specify one or more values") invited repeating the flag. The new opt-in **`cli_extend()`** annotation makes repeats accumulate into one flat list:
+  - `-t a -t b` → `['a', 'b']`; `-t a b -t c` → `['a', 'b', 'c']`.
+  - An omitted flag leaves earlier sources and the default untouched. A given flag replaces earlier sources as a whole, as list CLI values always have.
+  - Works at any nesting depth. The help text gains "; repeatable".
+  - Elements may be any scalar type, or a union or `Optional` of scalars (`List[Union[str, Path]]`, `list[str | Path]`). Element values are exactly what the plain option produces.
+  - Raises `ConfigBuilderError` on a non-list field, on non-scalar elements (lists, tuples, sets, dicts, dataclasses; the message names the element type), or combined with `cli_append`, `cli_positional` or `cli_exclude`.
+  - Fields without the annotation are unchanged. The README now documents that a repeated plain list flag keeps only its last occurrence.
+- **List option elements are converted to their declared type** (changed default behaviour). `List[int]`, `List[float]` and `Optional[List[int]]` options, at any nesting depth, used to return strings (`--n 1 2` → `['1', '2']`) and accepted invalid values. They now return typed values (`[1, 2]`), and an invalid element is a normal argparse error. Positional and `cli_append` lists already converted; all three paths now share one converter.
+- `List[int]` with `cli_choices([1, 2, 3])` rejected every value, because the string `'1'` never equals `1`. It now works.
+
+### Documentation
+- Corrected the type tables. `Path` and `Enum` CLI values are passed through **as strings**; the tables claimed `Path(...)` and `Enum` members. Converting them (consistently for CLI and config-file values) is planned for a future minor release.
+- Added `cli_extend` to README and API.md, and listed it in the compatibility notes for `cli_resolve` and `cli_list_merge`.
+
+### Tests
+- 1294 tests (up from 1234), with 97.88% coverage, on Python 3.11–3.14. No existing test's logic or assertions changed; two tests and one test class were renamed to neutral names.
+
 ## [1.10.0] - 2026-11-24
 
 ### Breaking

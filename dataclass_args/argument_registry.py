@@ -47,6 +47,7 @@ from .annotations import (
     get_cli_positional_nargs,
     get_cli_short,
     is_cli_append,
+    is_cli_extend,
     is_cli_positional,
 )
 from .append_action import RangeAppendAction
@@ -243,12 +244,9 @@ class ArgumentRegistry:
         Returns:
             Type converter function
         """
-        if info["is_list"] and info["args"]:
-            # Get the element type from List[T]
-            element_type = info["args"][0]
-            return self.get_argument_type(element_type)
-        else:
-            return self.get_argument_type(info["type"])
+        if info["is_list"]:
+            return self._list_element_converter(info)
+        return self.get_argument_type(info["type"])
 
     def _build_positional_kwargs(
         self,
@@ -549,24 +547,9 @@ class ArgumentRegistry:
         Returns:
             Type converter function
         """
-        # For List[T], use T as the type
-        # For List[List[T]], use T as the type (inner list handled by nargs)
-        if info["is_list"] and info["args"]:
-            element_type = info["args"][0]
-            # Check if it's List[List[T]]
-            element_origin = get_origin(element_type)
-            if element_origin is list:
-                # List[List[T]] - get inner type T
-                element_args = get_args(element_type)
-                if element_args:
-                    return self.get_argument_type(element_args[0])
-                else:
-                    return str
-            else:
-                # List[T] - use T directly
-                return self.get_argument_type(element_type)
-        else:
-            return self.get_argument_type(info["type"])
+        if info["is_list"]:
+            return self._list_element_converter(info)
+        return self.get_argument_type(info["type"])
 
     def _build_append_kwargs(
         self,
@@ -666,9 +649,30 @@ class ArgumentRegistry:
         # Note: bool is handled separately in add_boolean_argument
         if field_type in (int, float, str):
             return field_type
-        else:
-            # For complex types, use string and let validation handle it
+        # For complex types, use string and let validation handle it
+        return str
+
+    def _list_element_converter(self, info: Dict[str, Any]) -> Callable[[str], Any]:
+        """
+        Get the converter for the elements of a list field.
+
+        Shared by option, positional and append list fields so they cannot
+        drift apart. For List[T] the converter is that of T; for
+        List[List[T]] (inner list handled by nargs) it is that of the inner T.
+
+        Args:
+            info: Field information dictionary of a list field
+
+        Returns:
+            Type converter function (str when the element type is unknown)
+        """
+        if not info["args"]:
             return str
+        element_type = info["args"][0]
+        if get_origin(element_type) is list:
+            inner_args = get_args(element_type)
+            return self.get_argument_type(inner_args[0]) if inner_args else str
+        return self.get_argument_type(element_type)
 
     # ========================================================================
     # Helper Methods for Argument Generation
@@ -742,14 +746,28 @@ class ArgumentRegistry:
         """Add list field argument with appropriate nargs."""
         if info["is_optional"]:
             nargs_val = "*"
-            help_suffix = "(specify zero or more values)"
+            count_text = "zero or more"
         else:
             nargs_val = "+"
-            help_suffix = "(specify one or more values)"
+            count_text = "one or more"
 
-        final_help = self.build_help_text(help_text, choices, help_suffix)
+        extend = is_cli_extend(info)
+        suffix = "; repeatable" if extend else ""
+        final_help = self.build_help_text(
+            help_text, choices, f"(specify {count_text} values{suffix})"
+        )
+        kwargs: Dict[str, Any] = {}
+        if extend:
+            # default stays None: omitted means "not given", and argparse then
+            # starts each extend from a fresh list (never a default or layer)
+            kwargs["action"] = "extend"
         parser.add_argument(
-            *arg_names, nargs=nargs_val, choices=choices, help=final_help
+            *arg_names,
+            nargs=nargs_val,
+            type=self._list_element_converter(info),
+            choices=choices,
+            help=final_help,
+            **kwargs,
         )
 
     def add_dict_field(

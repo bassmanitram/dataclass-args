@@ -55,7 +55,7 @@ dataclass_args/
 ├── utils.py                # load_structured_file, deep_merge, copy_containers, fresh_field_default
 ├── instantiate.py          # instantiate() - object construction from config
 └── exceptions.py           # ConfigBuilderError (programming errors) / ConfigurationError (config errors)
-tests/                      # 1234 tests, ~98% coverage, Python 3.11–3.14
+tests/                      # 1294 tests, ~98% coverage, Python 3.11–3.14
 ```
 
 **Navigation Guide**:
@@ -115,10 +115,11 @@ These rules MUST be maintained:
 
 Things that surprise people:
 
-1. **List fields without cli_append accumulate from single flag**:
+1. **List fields take all values from a single flag; repeats keep the last occurrence** unless `cli_extend()` (flat accumulate) or `cli_append()` (one entry per occurrence):
    - **Why it's this way**: `--files a b c` puts all three in list (argparse default)
-   - **Common mistake**: Expecting `--files a --files b` to work (it doesn't without cli_append)
-   - **Correct approach**: Use `cli_append()` if you want `--files a --files b` pattern
+   - **Common mistake**: Expecting `--files a --files b` to give both (it silently keeps only `['b']`)
+   - **Correct approach**: `cli_extend()` for one flat list (`['a', 'b']`), `cli_append()` for one entry per occurrence
+   - **Element types** are converted for `int`/`float`/`str` lists (v1.10.1); `Path`/`Enum` CLI values stay strings by design (for now)
 
 2. **Boolean fields from base_configs work differently than CLI**:
    - **Why**: argparse uses `SUPPRESS` to distinguish "not specified" from "specified as False"
@@ -248,9 +249,7 @@ validate merge_strategy / rules / provenance options           (before any I/O)
 - **PyYAML** (optional): YAML loading, loosely coupled (via utils.py)
 
 **Projects that depend on this** (downstream):
-- **strands-agent-factory**: Uses dataclass-args for CLI scripts (chatbot, a2a-server)
-- **yacba**: Uses dataclass-args for configuration CLI generation
-- **Your CLI applications**: Configuration and argument parsing
+- **CLI applications and agent frameworks**: configuration and argument parsing, including layered configuration (defaults, user config, mandatory overrides) with provenance
 
 **Related projects** (siblings):
 - **profile-config**: File-based config vs dataclass-args' CLI args - often used together

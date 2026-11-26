@@ -939,7 +939,7 @@ def test_recorder_never_raises_for_a_build_without_layers():
 
 
 # ---------------------------------------------------------------------------
-# Consistency and the SAF end-to-end scenario
+# Consistency and the layered-policy end-to-end scenario
 # ---------------------------------------------------------------------------
 
 
@@ -976,7 +976,7 @@ def test_every_live_leaf_equals_the_raw_config_after_stage_4(monkeypatch):
         assert node == prov._live[tuple(path.split("."))]
 
 
-def test_SAF_end_to_end_scenario():
+def test_layered_policy_end_to_end_scenario():
     @dataclass
     class Cfg:
         plugins: List[str] = combine_annotations(

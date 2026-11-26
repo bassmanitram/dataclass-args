@@ -195,6 +195,45 @@ $ python app.py -t python -t cli -t tool
 # Result: ['python', 'cli', 'tool']
 ```
 
+#### Repeatable List Flags (`cli_extend`)
+
+A plain `List[T]` option takes several values after **one** flag (`--tags a b c`). If the flag is **repeated**, only the **last** occurrence is kept (argparse's default): `--tags a --tags b` gives `['b']`. To make repeats accumulate into one flat list, add `cli_extend()`:
+
+```python
+from dataclass_args import cli_extend
+
+@dataclass
+class Config:
+    paths: List[str] = combine_annotations(
+        cli_short('p'),
+        cli_extend(),
+        cli_help("Config files"),
+        default_factory=list
+    )
+```
+
+```bash
+$ python app.py -p a.json -p b.json       # ['a.json', 'b.json']
+$ python app.py -p a.json b.json -p c.json  # ['a.json', 'b.json', 'c.json']
+```
+
+How it combines with other sources:
+- If the flag is omitted, earlier sources (`base_configs`, `--config`) and the dataclass default keep their value.
+- If the flag is given, the accumulated CLI list **replaces** earlier sources as a whole. It's never appended to a default or to a config-file value. Use [list-merge rules](#layered-configuration) to combine lists *between* config sources.
+
+Details:
+- Element types are converted (`List[int]`: `-n 1 -n 2 3` → `[1, 2, 3]`), and `cli_choices` applies to every value.
+- For `Optional[List[T]]`, giving the flag with no values yields `[]`.
+- Works in nested dataclasses at any depth.
+- The help text reads "(specify one or more values; repeatable)".
+
+`cli_extend` versus `cli_append`: `cli_extend` flattens every occurrence into one list, while `cli_append` keeps one entry (or sub-list) per occurrence. They're mutually exclusive. `cli_extend` raises `ConfigBuilderError` if it's:
+- combined with `cli_append`, `cli_positional` or `cli_exclude`;
+- used on a non-list field;
+- used on a list with non-scalar elements (lists, tuples, sets, dicts, dataclasses).
+
+Elements may be any scalar type, or a union or `Optional` of scalars, e.g. `List[Union[str, Path]]` or `list[str | Path]`. Element values are exactly what the plain list option produces.
+
 #### Repeatable with Multiple Arguments
 
 Each occurrence can take multiple arguments using `nargs`:
@@ -941,7 +980,7 @@ $ python app.py --plugins "plugins/*.json" "extra/*.yaml"
 
 #### Compatibility
 
-- **Works with**: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge` (list rules run on the raw values, before the resolver), `combine_annotations`
+- **Works with**: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge` (list rules run on the raw values, before the resolver), `cli_extend` (list fields), `combine_annotations`
 - **Incompatible with** (on same field): `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - **Nested fields**: Allowed in nested dataclasses, but resolver is NOT called (value stays raw)
 
@@ -1685,7 +1724,7 @@ sandbox: Optional[SandboxBase] = combine_annotations(
 
 **Important:**
 - Resolver is NOT called when value is None
-- Compatible with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `combine_annotations`
+- Compatible with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `cli_extend` (list fields), `combine_annotations`
 - Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - In nested dataclasses: allowed but resolver NOT called (value stays raw)
 
@@ -1741,10 +1780,10 @@ Dataclass CLI supports standard Python types:
 | `int` | Parsed as integer | `--count 42` |
 | `float` | Parsed as float | `--rate 0.1` |
 | `bool` | Flag with negative | `--debug` or `--no-debug` |
-| `List[T]` | Multiple values | `--items a b c` |
+| `List[T]` | Multiple values after one flag; elements converted to `T` for `int`/`float`/`str` (a repeated flag keeps the last occurrence unless `cli_extend()`) | `--items a b c` |
 | `Dict[str, Any]` | Dict or structured file + property overrides | `--model-config m.json --mc temperature:0.9 --mc tags.0:new` |
 | `Optional[T]` | Optional parameter | `--timeout 30` (or omit) |
-| `Path` | Path object | `--output /path/to/file` |
+| `Path` | The path as typed, as a **string** (not converted to `Path`) | `--output /path/to/file` |
 | Custom types | String representation | `--custom "value"` |
 
 ## Configuration File Formats
@@ -1957,6 +1996,7 @@ from dataclass_args import (
     cli_override_name,           # Custom dict override abbreviation
     cli_resolve,                 # Post-load resolution
     cli_list_merge,              # Append-in-rules-layers list fields
+    cli_extend,                  # Repeatable list flags that accumulate
     combine_annotations,         # Combine features
     ConfigLayer,                 # Named config layer (replace | rules)
     deep_merge,                  # Recursive dict merge utility

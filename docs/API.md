@@ -600,7 +600,7 @@ After the raw value is assembled from all configuration sources (base_configs, c
 - `ConfigurationError` raised by resolver is re-raised without double-wrapping
 
 **Compatibility:**
-- Works with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `combine_annotations`
+- Works with: `cli_help`, `cli_short`, `cli_choices`, `cli_list_merge`, `cli_extend` (list fields), `combine_annotations`
 - Incompatible with: `cli_positional`, `cli_nested`, `cli_append`, `cli_exclude`, `cli_file_loadable`
 - In nested dataclasses: allowed but resolver NOT called (value stays raw; application resolves explicitly)
 
@@ -837,7 +837,30 @@ skills: Dict[str, Any] = combine_annotations(
   - a field that's neither a list nor a dict;
   - a `cli_nested` field. Annotate the nested class's own fields instead; rules apply at any depth.
 
-**Compatible with:** `cli_resolve`, `cli_append`, `cli_help`, `cli_short`, `cli_positional`, `cli_exclude`. No CLI arguments are added.
+**Compatible with:** `cli_resolve`, `cli_append`, `cli_extend`, `cli_help`, `cli_short`, `cli_positional`, `cli_exclude`. No CLI arguments are added.
+
+---
+
+### `cli_extend(**kwargs)`
+
+Makes a `List[T]` / `Optional[List[T]]` option **repeatable**. Every occurrence's values are appended to one flat list (argparse `action="extend"`). Without it, a repeated list flag keeps only its last occurrence.
+
+```python
+paths: List[str] = combine_annotations(cli_short("p"), cli_extend(), default_factory=list)
+# -p a -p b       → ['a', 'b']
+# -p a b -p c     → ['a', 'b', 'c']
+```
+
+- **When the flag is omitted:** earlier sources and the dataclass default keep their value.
+- **When it's given:** the accumulated CLI list replaces earlier sources as a whole. It's never appended to a default or to a config value.
+- **Values:** element types are converted, and `cli_choices` is checked for every value. `Optional[List[T]]` with no values yields `[]`.
+- **Nesting:** works in nested dataclasses at any depth.
+- **Help suffix:** "(specify one or more values; repeatable)", or "zero or more" for Optional.
+- **Raises `ConfigBuilderError`** (when the builder is constructed) on:
+  - a non-list field;
+  - a list with non-scalar elements (lists, tuples, sets, dicts, dataclasses). The message names the element type, and suggests `cli_append(nargs=…)` for a list of lists. Unions and `Optional`s of scalars (`List[Union[str, Path]]`, `list[str | Path]`) are accepted;
+  - combination with `cli_append`, `cli_positional` or `cli_exclude`.
+- **Compatible with:** `cli_short`, `cli_help`, `cli_choices`, `cli_resolve` (the resolver receives the final list), `cli_list_merge` (which applies between config sources, never to CLI values).
 
 ---
 
@@ -962,13 +985,13 @@ config = builder.build_config(args)
 | `int` | Parsed as integer | `--count 42` | `42` |
 | `float` | Parsed as float | `--rate 3.14` | `3.14` |
 | `bool` | Boolean flag | `--debug` or `--no-debug` | `True` or `False` |
-| `List[str]` | Multiple string values | `--tags a b c` | `["a", "b", "c"]` |
+| `List[str]` | Multiple string values (one flag; repeat with `cli_extend`) | `--tags a b c` | `["a", "b", "c"]` |
 | `List[int]` | Multiple integer values | `--ids 1 2 3` | `[1, 2, 3]` |
 | `List[float]` | Multiple float values | `--values 1.5 2.5` | `[1.5, 2.5]` |
-| `Dict[str, Any]` | JSON/config file or key:value | `--config file.json` or `--c k:v` | `{...}` |
+| `Dict[str, Any]` | Dict or structured file, plus key:value overrides | `--model-config m.json` or `--mc k:v` | `{...}` |
 | `Optional[T]` | Optional parameter | `--timeout 30` or omit | `30` or `None` |
-| `Path` | File path | `--output /tmp/file` | `Path('/tmp/file')` |
-| `Enum` | Enum member (by value) | `--status active` | `Status.ACTIVE` |
+| `Path` | File path (passed through as typed; not converted) | `--output /tmp/file` | `'/tmp/file'` (str) |
+| `Enum` | Value as typed (not converted to the member) | `--status active` | `'active'` (str) |
 
 ### Type Examples
 

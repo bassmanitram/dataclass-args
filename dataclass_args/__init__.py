@@ -95,6 +95,7 @@ from .annotations import (
     cli_append,
     cli_choices,
     cli_exclude,
+    cli_extend,
     cli_file_loadable,
     cli_help,
     cli_include,
@@ -119,6 +120,7 @@ from .annotations import (
     get_cli_short,
     is_cli_append,
     is_cli_excluded,
+    is_cli_extend,
     is_cli_file_loadable,
     is_cli_included,
     is_cli_nested,
@@ -143,7 +145,7 @@ from .instantiate import instantiate
 from .provenance import MISSING_VALUE, Provenance, ProvenanceChange, ProvenanceEntry
 from .utils import deep_merge, load_structured_file
 
-__version__ = "1.10.0"
+__version__ = "1.10.1"
 
 __all__ = [
     # Main API
@@ -165,6 +167,7 @@ __all__ = [
     "cli_nested",
     "cli_positional",
     "cli_append",
+    "cli_extend",
     "cli_resolve",
     "combine_annotations",
     "get_cli_short",
@@ -185,6 +188,7 @@ __all__ = [
     "is_cli_nested",
     "is_cli_positional",
     "is_cli_append",
+    "is_cli_extend",
     "is_cli_resolve",
     # File loading
     "load_file_content",

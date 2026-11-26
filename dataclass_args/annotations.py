@@ -374,6 +374,38 @@ def cli_append(
     return field(**field_kwargs)
 
 
+def cli_extend(**kwargs) -> Any:
+    """
+    Mark a list field so a repeated option accumulates its values.
+
+    Without this annotation, repeating a list option keeps only the last
+    occurrence (argparse ``store``). With it, every occurrence extends the
+    list: ``-t a -t b`` and ``-t a b`` both give ``['a', 'b']``. The final
+    list replaces earlier layers as a whole, as any CLI value does.
+
+    Args:
+        **kwargs: Additional field parameters (default_factory, etc.)
+
+    Returns:
+        Field object with extend metadata
+
+    Note:
+        - Only valid on List[T] / Optional[List[T]] fields with scalar elements
+        - Cannot be combined with cli_append, cli_positional or cli_exclude
+        - Use cli_append(nargs=...) to keep each occurrence as a sub-list
+    """
+    field_kwargs = kwargs.copy()
+    metadata = field_kwargs.pop("metadata", {})
+    metadata["cli_extend"] = True
+
+    # Move 'help' to metadata if present (dataclass field() doesn't accept it)
+    if "help" in field_kwargs:
+        metadata["cli_help"] = field_kwargs.pop("help")
+
+    field_kwargs["metadata"] = metadata
+    return field(**field_kwargs)
+
+
 LIST_MERGE_APPEND = "append"
 LIST_MERGE_APPEND_UNIQUE = "append_unique"
 LIST_MERGE_MODES = (LIST_MERGE_APPEND, LIST_MERGE_APPEND_UNIQUE)
@@ -649,6 +681,11 @@ def is_cli_file_loadable(field_info: Dict[str, Any]) -> bool:
 def is_cli_append(field_info: Dict[str, Any]) -> bool:
     """Check if a field uses append action for repeated options."""
     return _FieldMetadata.get_bool(field_info, "cli_append")
+
+
+def is_cli_extend(field_info: Dict[str, Any]) -> bool:
+    """Check if a list field accumulates repeated options (cli_extend)."""
+    return _FieldMetadata.get_bool(field_info, "cli_extend")
 
 
 def is_cli_positional(field_info: Dict[str, Any]) -> bool:

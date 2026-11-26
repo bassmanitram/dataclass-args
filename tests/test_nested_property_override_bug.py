@@ -26,9 +26,9 @@ from dataclass_args import build_config, cli_nested
 class TestNestedPropertyOverrideBug:
     """Test cases demonstrating the property override bug with cli_nested."""
 
-    def test_yacba_scenario_no_prefix(self):
+    def test_nested_override_no_prefix_scenario(self):
         """
-        Reproduce the exact YACBA scenario from bug report.
+        Reproduce the no-prefix nested override scenario from the bug report.
 
         This is the most critical test case - when prefix="" the override
         arguments ARE generated (--mc) and ARE parsed, but the values
@@ -37,19 +37,19 @@ class TestNestedPropertyOverrideBug:
 
         @dataclass
         class AgentFactoryConfig:
-            """Simulates strands-agent-factory's AgentFactoryConfig."""
+            """Simulates an agent factory config."""
 
             model_config: Optional[Dict[str, Any]] = None
 
         @dataclass
-        class YacbaConfig:
-            """Simulates YACBA's config structure."""
+        class AppConfig:
+            """Simulates an application's config structure."""
 
             agent: AgentFactoryConfig = cli_nested(prefix="")
 
-        # Command: yacba --mc temperature:0.7
+        # Command: app --mc temperature:0.7
         # The --mc argument exists (from model_config -> mc abbreviation)
-        config = build_config(YacbaConfig, ["--mc", "temperature:0.7"])
+        config = build_config(AppConfig, ["--mc", "temperature:0.7"])
 
         # Expected: agent.model_config should be {"temperature": 0.7}
         # Actual BUG: agent.model_config is None
