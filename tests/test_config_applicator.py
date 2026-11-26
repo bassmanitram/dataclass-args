@@ -129,7 +129,7 @@ class TestApplyPropertyOverrides:
 
     def test_invalid_format_raises_error(self):
         target = {}
-        with pytest.raises(ValueError, match="Invalid override format"):
+        with pytest.raises(ValueError, match="Invalid override"):
             ConfigApplicator.apply_property_overrides(target, ["no_colon_here"])
 
     def test_numeric_values(self):

@@ -18,7 +18,7 @@ import argparse
 from typing import Any, Dict
 
 from .annotations import is_cli_resolve
-from .config_applicator import ConfigApplicator
+from .config_applicator import ConfigApplicator, InvalidOverrideError
 from .exceptions import ConfigurationError
 from .file_loading import process_file_loadable_value
 from .merge_strategy import MergeContext, combine_dicts
@@ -259,6 +259,10 @@ class CliOverrideProcessor:
 
         try:
             ConfigApplicator.apply_property_overrides(target, override_value, observer)
+        except InvalidOverrideError as e:
+            raise ConfigurationError(
+                e.describe(field_name, info["override_name"], info["cli_name"])
+            ) from e
         except Exception as e:
             raise ConfigurationError(
                 f"Failed to apply property overrides for field '{field_name}': {e}"

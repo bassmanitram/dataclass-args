@@ -12,7 +12,7 @@ from dataclasses import MISSING, fields, is_dataclass
 from typing import Any, Dict, Tuple
 
 from .annotations import is_cli_resolve
-from .config_applicator import ConfigApplicator
+from .config_applicator import ConfigApplicator, InvalidOverrideError
 from .exceptions import ConfigBuilderError, ConfigurationError
 from .file_loading import process_file_loadable_value
 from .merge_strategy import MergeContext, combine_dicts
@@ -449,6 +449,11 @@ class NestedFieldProcessor:
         observer = override_observer(ctx, path, target)
         try:
             ConfigApplicator.apply_property_overrides(target, override_value, observer)
+        except InvalidOverrideError as e:
+            file_option = self._build_flat_cli_name(nested_field, mapping["prefix"])
+            raise ConfigurationError(
+                e.describe(".".join(path), override, file_option)
+            ) from e
         except Exception as e:
             raise ConfigurationError(
                 f"Failed to apply property overrides for nested field "

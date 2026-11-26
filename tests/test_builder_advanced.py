@@ -219,7 +219,7 @@ class TestPropertyOverrides:
 
         try:
             with pytest.raises(
-                ConfigurationError, match="Invalid override format.*expected"
+                ConfigurationError, match="Invalid override for .settings. \\(--s\\)"
             ):
                 build_config(
                     self.AppConfig,

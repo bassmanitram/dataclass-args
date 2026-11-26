@@ -55,7 +55,7 @@ dataclass_args/
 ├── utils.py                # load_structured_file, deep_merge, copy_containers, fresh_field_default
 ├── instantiate.py          # instantiate() - object construction from config
 └── exceptions.py           # ConfigBuilderError (programming errors) / ConfigurationError (config errors)
-tests/                      # 1353 tests, ~98% coverage, Python 3.11–3.14
+tests/                      # 1376 tests, ~98% coverage, Python 3.11–3.14
 ```
 
 **Navigation Guide**:

@@ -22,11 +22,13 @@ This release also includes the fixes from an independent QA review of the whole 
 - **Error message wording changed:**
   - a missing field is now "missing required field: 'name'" instead of Python's "missing 1 required positional argument";
   - `@file` errors no longer repeat their prefix;
+  - invalid property overrides are reported as "Invalid override for 'field' (--option): …";
   - the `base_configs` type error lists `ConfigLayer`.
 
 ### Fixed
 - **A field whose name starts with `_` silently ignored its command-line value** (`---count 7` left the default). Every argument is now registered with an explicit destination.
 - **Two arguments sharing one Namespace attribute overwrote each other silently.** For example, a positional named `config` was read as the `--config` option, and an override name equal to a field name clashed with that field. This is now a `ConfigBuilderError`, naming both.
+- **A malformed property-override key was stored silently instead of being rejected.** `--mc '{"temperature": 0.1}'` stored the key `'{"temperature"'`. Quoted keys, keys with spaces, `items[0]` and empty segments (`a..b`, `:1`) also created nonsense keys. Every key segment is now validated, and a malformed override raises `ConfigurationError` naming the field and option, and pointing at the field's file option for setting the whole dict. Valid forms are unchanged (`a.b`, `items.0`, `items.+`, colons in the value, hyphens and slashes in keys).
 - A `%` in help text or in a choice crashed `--help`.
 - A bare `list` annotation was treated as a single string.
 - `~` wasn't expanded in config-file paths (`base_configs`, `--config` and dict-field files), although the README relied on it.
@@ -67,7 +69,7 @@ This release also includes the fixes from an independent QA review of the whole 
 - Removed the unused `[tool.flake8]` table from `pyproject.toml`; it contradicted `.flake8`, which is the only flake8 configuration flake8 reads.
 
 ### Tests
-- 1353 tests (up from 1234), with 97.72% coverage, on Python 3.11–3.14.
+- 1376 tests (up from 1234), with 97.68% coverage, on Python 3.11–3.14.
 - Existing tests changed: two tests and one test class renamed to neutral names; tests that pinned a behaviour fixed above (dict-field strings, `Optional[Union]`, message wording) updated to the new behaviour; one test skipped when run as root (a mode-000 file is readable by root).
 
 ## [1.10.0] - 2026-11-24

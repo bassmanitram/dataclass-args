@@ -1507,6 +1507,16 @@ $ python app.py --model-config model.yaml --mc tags.0:first --mc tags.+:last
 - Negative indices are not supported
 - If the container is a dict (not a list), `0` and `+` are ordinary string keys: `{"0": "value"}`. So if `items` doesn't exist yet, `items.0:x` creates `{"items": {"0": "x"}}`; set the list first if you want list behaviour
 
+**Key syntax:**
+- The argument is split at the **first** `:`, so values may contain colons (`--mc url:http://host:8080/p`).
+- Key segments are separated by dots. Each segment must be non-empty and contain no whitespace, quotes, braces or brackets. Hyphens, slashes and other characters are fine (`max-tokens`, `provider/model`).
+- Anything else raises `ConfigurationError` naming the field and option, for example:
+  - a JSON object (`--mc '{"temperature": 0.1}'`);
+  - a quoted key;
+  - `items[0]` (use `items.0`);
+  - an `@file` value.
+- An override sets **one property**. To set the whole dict, pass a file to the field's own option (`--model-config model.yaml`).
+
 #### Override Name Collisions
 
 When two dict fields share the same auto-generated abbreviation, use `cli_override_name()`:

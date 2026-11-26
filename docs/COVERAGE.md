@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project maintains **97.72%** code coverage with comprehensive testing and branch coverage enabled.
+This project maintains **97.68%** code coverage with comprehensive testing and branch coverage enabled.
 
 ## Current Coverage Statistics (v1.10.1)
 
@@ -13,8 +13,8 @@ This project maintains **97.72%** code coverage with comprehensive testing and b
 | `append_action.py` | 6 | 0 | 0 | 0 | **100.00%** |
 | `argument_registry.py` | 217 | 1 | 80 | 4 | **98.32%** |
 | `builder.py` | 42 | 0 | 10 | 3 | **94.23%** |
-| `cli_overrides.py` | 91 | 0 | 30 | 0 | **100.00%** |
-| `config_applicator.py` | 102 | 0 | 44 | 0 | **100.00%** |
+| `cli_overrides.py` | 93 | 2 | 30 | 0 | **98.37%** |
+| `config_applicator.py` | 118 | 0 | 48 | 0 | **100.00%** |
 | `config_merging.py` | 64 | 1 | 20 | 1 | **97.62%** |
 | `config_resolver.py` | 68 | 0 | 12 | 0 | **100.00%** |
 | `convenience.py` | 97 | 0 | 46 | 9 | **93.71%** |
@@ -25,17 +25,17 @@ This project maintains **97.72%** code coverage with comprehensive testing and b
 | `instantiate.py` | 178 | 1 | 66 | 1 | **99.18%** |
 | `layer_normalization.py` | 82 | 0 | 30 | 0 | **100.00%** |
 | `merge_strategy.py` | 50 | 0 | 24 | 0 | **100.00%** |
-| `nested_processor.py` | 196 | 5 | 82 | 3 | **97.12%** |
+| `nested_processor.py` | 199 | 5 | 82 | 3 | **97.15%** |
 | `option_collisions.py` | 127 | 5 | 68 | 7 | **93.85%** |
 | `provenance.py` | 202 | 2 | 64 | 2 | **98.50%** |
 | `type_inspector.py` | 65 | 1 | 28 | 2 | **96.77%** |
 | `utils.py` | 142 | 0 | 48 | 0 | **100.00%** |
 | `value_resolution.py` | 72 | 3 | 34 | 1 | **96.23%** |
-| **TOTAL** | **2384** | **33** | **904** | **40** | **97.72%** |
+| **TOTAL** | **2405** | **35** | **908** | **40** | **97.68%** |
 
 ## Test Suite
 
-- **Total Tests:** 1353
+- **Total Tests:** 1376
 - **Test Execution Time:** ~10s
 - **All Tests Passing:** ✅
 - **Python Version:** 3.11+ (tested on 3.11–3.14)
@@ -43,8 +43,8 @@ This project maintains **97.72%** code coverage with comprehensive testing and b
 ## Coverage Requirements
 
 - **Minimum Required:** 88%
-- **Current Coverage:** 97.72% ✅
-- **Modules at 100%:** 11 of 23
+- **Current Coverage:** 97.68% ✅
+- **Modules at 100%:** 10 of 23
 
 ## Coverage History
 
@@ -57,7 +57,7 @@ This project maintains **97.72%** code coverage with comprehensive testing and b
 | v1.8.1 | 675 | 97.74% | +15 tests, major refactor |
 | v1.9.0 | 723 | 97.58% | +48 tests (cli_override_name, list overrides) |
 | v1.10.0 | 1234 | 98.02% | +511 tests (defect fixes, deep merge, layers, list rules, provenance, nesting at any depth) |
-| v1.10.1 | 1353 | 97.72% | +119 tests (list element types, cli_extend, QA review fixes) |
+| v1.10.1 | 1376 | 97.68% | +142 tests (list element types, cli_extend, QA review fixes) |
 
 ## Architecture (v1.10.0)
 
@@ -136,7 +136,7 @@ tests/
 
 ## Quality Metrics
 
-- **Test Execution:** Fast (~10s for 1353 tests)
+- **Test Execution:** Fast (~10s for 1376 tests)
 - **Test Reliability:** 100% (no flaky tests)
 - **Cognitive Complexity:** All functions CC≤10
 - **Test Clarity:** High (class-based organization, one class per concern)

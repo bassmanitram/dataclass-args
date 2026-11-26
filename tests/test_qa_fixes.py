@@ -887,3 +887,127 @@ def test_nested_positional_still_gets_its_dedicated_error():
 
     with pytest.raises(ConfigBuilderError, match="Positional arguments in nested"):
         build_config(Outer, [])
+
+
+# ---------------------------------------------------------------------------
+# Property-override keys are validated (malformed keys used to create nonsense
+# keys silently)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OverrideKeyApp:
+    model_config: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OverrideKeyDb:
+    opts: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OverrideKeyNestedApp:
+    db: OverrideKeyDb = cli_nested(default_factory=OverrideKeyDb)
+
+
+def override_key_config(override: str) -> Dict[str, Any]:
+    """Build OverrideKeyApp with one --mc override and return model_config."""
+    return build_config(OverrideKeyApp, ["--mc", override]).model_config
+
+
+@pytest.mark.parametrize(
+    "override, expected",
+    [
+        ("temperature:0.2", {"temperature": 0.2}),
+        ("a.b:1", {"a": {"b": 1}}),
+        ("url:http://x:8080/p", {"url": "http://x:8080/p"}),
+        ("max-tokens:5", {"max-tokens": 5}),
+        ("provider/model:x", {"provider/model": "x"}),
+        ("a:", {"a": ""}),
+    ],
+)
+def test_override_key_valid_forms_unchanged(override, expected):
+    assert override_key_config(override) == expected
+
+
+def test_override_key_list_index_and_append_unchanged():
+    @dataclass
+    class WithItems:
+        model_config: Dict[str, Any] = field(
+            default_factory=lambda: {"items": ["a", "b"]}
+        )
+
+    config = build_config(WithItems, ["--mc", "items.0:x", "--mc", "items.+:z"])
+    assert config.model_config == {"items": ["x", "b", "z"]}
+
+
+OVERRIDE_KEY_MESSAGE = (
+    "Invalid override for 'model_config' (--mc): '{text}'. "
+    "Expected key.path:value; to set the whole dict, "
+    "pass a file to --model-config."
+)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        '{"temperature": 0.1}',
+        '"temperature":0.1',
+        "'t':1",
+        "a b:1",
+        "a\tb:1",
+        "a..b:1",
+        ".a:1",
+        "a.:1",
+        ":1",
+        "a{b}:1",
+        "no_colon",
+    ],
+)
+def test_override_key_malformed_is_rejected_with_clean_message(override):
+    with pytest.raises(ConfigurationError) as exc:
+        override_key_config(override)
+    assert str(exc.value) == OVERRIDE_KEY_MESSAGE.format(text=override)
+
+
+def test_override_key_brackets_get_the_dots_hint():
+    with pytest.raises(ConfigurationError) as exc:
+        override_key_config("items[0]:x")
+    assert str(exc.value) == (
+        OVERRIDE_KEY_MESSAGE.format(text="items[0]:x")
+        + " (list indexes use dots: items.0)"
+    )
+
+
+def test_override_key_file_reference_gets_the_file_option_hint():
+    with pytest.raises(ConfigurationError) as exc:
+        override_key_config("@cfg.json")
+    assert str(exc.value) == (
+        OVERRIDE_KEY_MESSAGE.format(text="@cfg.json")
+        + " (@file is not supported here; pass the file to --model-config)"
+    )
+
+
+def test_override_key_message_names_the_field_once():
+    with pytest.raises(ConfigurationError) as exc:
+        override_key_config('{"temperature": 0.1}')
+    message = str(exc.value)
+    assert message.count("model_config") == 1
+    assert "Failed to apply" not in message
+
+
+def test_override_key_nested_dict_field_names_path_and_options():
+    with pytest.raises(ConfigurationError) as exc:
+        build_config(OverrideKeyNestedApp, ["--db-o", '{"a": 1}'])
+    message = str(exc.value)
+    assert message == (
+        "Invalid override for 'db.opts' (--db-o): '{\"a\": 1}'. "
+        "Expected key.path:value; to set the whole dict, pass a file to "
+        "--db-opts."
+    )
+    assert message.count("db.opts") == 1
+
+
+def test_override_key_nested_valid_form_still_applies():
+    config = build_config(OverrideKeyNestedApp, ["--db-o", "a.b:1"])
+    assert config.db.opts == {"a": {"b": 1}}

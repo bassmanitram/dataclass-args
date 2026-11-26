@@ -13,6 +13,49 @@ from .exceptions import ConfigurationError
 from .merge_strategy import MergeContext, combine_dicts
 from .utils import load_structured_file
 
+# Characters no key-path segment may contain (whitespace is rejected separately)
+FORBIDDEN_KEY_CHARS = frozenset("\"'{}[]")
+BRACKET_CHARS = frozenset("[]")
+FILE_REFERENCE_PREFIX = "@"
+
+
+class InvalidOverrideError(ValueError):
+    """A property override string is not a well-formed ``key.path:value``."""
+
+    def __init__(self, override: str) -> None:
+        """Remember the offending override text."""
+        super().__init__(f"Invalid override '{override}'. Expected key.path:value")
+        self.override = override
+
+    def describe(self, field_name: str, override_option: str, file_option: str) -> str:
+        """
+        Build the user-facing message naming the field, its options and the text.
+
+        Args:
+            field_name: Dotted path of the dict field the override targets
+            override_option: The property-override option the user typed (``--mc``)
+            file_option: The field's file option (``--model-config``)
+        """
+        message = (
+            f"Invalid override for '{field_name}' ({override_option}): "
+            f"'{self.override}'. Expected key.path:value; to set the whole dict, "
+            f"pass a file to {file_option}."
+        )
+        if self.override.startswith(FILE_REFERENCE_PREFIX):
+            message += f" (@file is not supported here; pass the file to {file_option})"
+        if BRACKET_CHARS.intersection(self.override.split(":", 1)[0]):
+            message += " (list indexes use dots: items.0)"
+        return message
+
+
+def _is_valid_key_segment(segment: str) -> bool:
+    """True if a key-path segment is non-empty and free of forbidden characters."""
+    return (
+        bool(segment)
+        and not any(char.isspace() for char in segment)
+        and FORBIDDEN_KEY_CHARS.isdisjoint(segment)
+    )
+
 
 class ConfigApplicator:
     """
@@ -176,15 +219,18 @@ class ConfigApplicator:
                 provenance)
 
         Raises:
-            ValueError: If override format is invalid
+            InvalidOverrideError: If an override has no ``:`` or a malformed key
+                path (an empty segment, or whitespace, quotes, braces or brackets
+                in a segment). A ``ValueError``; the pipeline re-raises it as a
+                ``ConfigurationError`` naming the field.
         """
         for override in overrides:
-            if ":" not in override:
-                raise ValueError(
-                    f"Invalid override format: {override} (expected key.path:value)"
-                )
+            path, separator, value_str = override.partition(":")
+            if not separator or not all(
+                _is_valid_key_segment(segment) for segment in path.split(".")
+            ):
+                raise InvalidOverrideError(override)
 
-            path, value_str = override.split(":", 1)
             ConfigApplicator.set_nested_property(target_dict, path, value_str)
             if observer is not None:
                 observer(path.split("."), ConfigApplicator.parse_value(value_str))
