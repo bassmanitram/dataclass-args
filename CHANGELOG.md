@@ -66,10 +66,12 @@ This release also includes the fixes from an independent QA review of the whole 
 - Added `cli_extend` to README and API.md, and listed it in the compatibility notes for `cli_resolve` and `cli_list_merge`.
 
 ### Development
+- **Automated releases.** When a merge to `main` passes the `Test` workflow and sets a version that has no `v<version>` tag, the new `auto-tag.yml` workflow tags the commit and starts the release pipeline. It first checks that the version is plain `MAJOR.MINOR.PATCH`, higher than every existing release tag, matches `__version__`, and has a CHANGELOG entry. This works with every merge style. `release.yml` can now also be started by dispatch, and only ever runs from a `v*` tag. See CONTRIBUTING, "Release Checklist".
+- Workflows are linted with `actionlint` (including shellcheck); quoting fixes in `release.yml`, `docs.yml` and `status.yml`.
 - Removed the unused `[tool.flake8]` table from `pyproject.toml`; it contradicted `.flake8`, which is the only flake8 configuration flake8 reads.
 
 ### Tests
-- 1376 tests (up from 1234), with 97.68% coverage, on Python 3.11–3.14.
+- 1399 tests (up from 1234), with 97.68% coverage, on Python 3.11–3.14.
 - Existing tests changed: two tests and one test class renamed to neutral names; tests that pinned a behaviour fixed above (dict-field strings, `Optional[Union]`, message wording) updated to the new behaviour; one test skipped when run as root (a mode-000 file is readable by root).
 
 ## [1.10.0] - 2026-11-24

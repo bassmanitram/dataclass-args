@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:  # Started by auto-tag.yml; tags pushed with GITHUB_TOKEN do not trigger push events
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   create-release:
@@ -14,6 +19,13 @@ jobs:
       id-token: write  # Required for trusted publishing
 
     steps:
+    - name: Require a version tag ref
+      run: |
+        if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+          echo "::error::Release must run from a v* tag, not $GITHUB_REF"
+          exit 1
+        fi
+
     - uses: actions/checkout@v7
       with:
         fetch-depth: 0
@@ -27,8 +39,8 @@ jobs:
       id: version
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Generate changelog
       id: changelog
@@ -36,7 +48,7 @@ jobs:
         # Generate changelog from commits since last tag
         PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
         if [ -n "$PREVIOUS_TAG" ]; then
-          CHANGELOG=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD)
+          CHANGELOG=$(git log --pretty=format:"- %s" "$PREVIOUS_TAG..HEAD")
         else
           CHANGELOG=$(git log --pretty=format:"- %s")
         fi
@@ -49,7 +61,7 @@ jobs:
           echo "changelog<<EOF"
           echo "$CHANGELOG"
           echo "EOF"
-        } >> $GITHUB_OUTPUT
+        } >> "$GITHUB_OUTPUT"
 
     - name: Install build dependencies
       run: |

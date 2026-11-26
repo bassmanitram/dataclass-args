@@ -39,7 +39,7 @@ jobs:
     - name: Validate examples compile
       run: |
         cd examples
-        python -m py_compile *.py
+        python -m py_compile ./*.py
         echo "✓ All examples compile successfully"
 
     - name: Test documentation examples

@@ -231,13 +231,32 @@ We follow [Semantic Versioning](https://semver.org/):
 
 ### Release Checklist
 
-1. Update version in `pyproject.toml`
-2. Update `CHANGELOG.md`
-3. Run full test suite
-4. Update documentation
-5. Create release PR
-6. Tag release after merge
-7. Publish to PyPI
+1. In the release PR, set the new version in **both** `pyproject.toml` (`version = "X.Y.Z"`) and `dataclass_args/__init__.py` (`__version__ = "X.Y.Z"`).
+2. Add a `## [X.Y.Z] - YYYY-MM-DD` entry to `CHANGELOG.md`.
+3. Make sure the full test suite and the docs are up to date.
+4. Merge the PR into `main`. Any merge style works: merge commit, squash or rebase.
+
+Tagging and publishing are **automatic**. There's no manual tag step.
+
+### What happens after the merge
+
+- The `Test` workflow runs on `main`.
+- When it passes, `auto-tag.yml` runs `scripts/release_tag_check.sh` on the merged commit. If `vX.Y.Z` doesn't exist yet, the script checks that:
+  - `X.Y.Z` is plain `MAJOR.MINOR.PATCH`;
+  - `__version__` matches `pyproject.toml`;
+  - `CHANGELOG.md` has a `## [X.Y.Z]` heading;
+  - `X.Y.Z` is higher than every existing `v*` tag.
+- If all checks pass, it creates the annotated tag `vX.Y.Z` on that commit and starts `release.yml` for the tag. `release.yml` builds the package, creates the GitHub Release and publishes to PyPI with trusted publishing.
+
+A merge that doesn't change the version does nothing, because its tag already exists. A failed check stops the job with an error naming the problem, and nothing is tagged or published. Fix it in a follow-up PR.
+
+`release.yml` is started by a dispatch rather than by the tag push, because GitHub doesn't run workflows for tags pushed with the built-in token. Pushing a `v*` tag by hand still triggers a release as before.
+
+You can preview the decision locally:
+
+```bash
+scripts/release_tag_check.sh HEAD   # prints tag=vX.Y.Z, or tag= with the reason on stderr
+```
 
 ## Getting Help
 
