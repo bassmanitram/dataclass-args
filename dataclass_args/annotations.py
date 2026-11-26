@@ -17,8 +17,10 @@ class _FieldMetadata:
     """
     Unified accessor for field metadata.
 
-    Internal class that eliminates duplication across all get_cli_* and is_cli_* functions.
-    All these functions share the same pattern: extract field_obj, check metadata, return value.
+    Internal class that eliminates duplication across all get_cli_* and is_cli_*
+    functions.
+    All these functions share the same pattern: extract field_obj, check metadata,
+    return value.
     """
 
     @staticmethod
@@ -43,6 +45,16 @@ class _FieldMetadata:
     def get_bool(field_info: Dict[str, Any], key: str) -> bool:
         """Get boolean metadata value (defaults to False)."""
         return _FieldMetadata.get(field_info, key, False)
+
+
+def _own_metadata(field_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Pop ``metadata`` from field kwargs as a new dict.
+
+    The caller's mapping is copied, never mutated, so one metadata dict can be
+    shared between fields (and a read-only mapping works too).
+    """
+    return dict(field_kwargs.pop("metadata", None) or {})
 
 
 # ============================================================================
@@ -71,7 +83,7 @@ def cli_exclude(**kwargs) -> Any:
             secret: str = cli_exclude(default="hidden")  # Won't be CLI argument
     """
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_exclude"] = True
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
@@ -96,7 +108,7 @@ def cli_include(**kwargs) -> Any:
             other_field: str = "default"  # Included by default anyway
     """
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_include"] = True
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
@@ -113,7 +125,10 @@ def cli_nested(prefix: Optional[str] = None, **kwargs) -> Any:
         prefix: Prefix for nested field CLI arguments:
                 - "" (empty string): No prefix, flatten completely
                 - "custom": Use custom prefix (e.g., "w" -> --w-field)
-                - None (default): Auto-prefix with field name (e.g., "wrapper" -> --wrapper-field)
+                - None (default): Auto-prefix with field name
+                  (e.g., "wrapper" -> --wrapper-field)
+                Underscores become hyphens, as in field names
+                ("my_db" -> --my-db-field).
         **kwargs: Additional field parameters (default, default_factory, etc.)
 
     Returns:
@@ -121,12 +136,15 @@ def cli_nested(prefix: Optional[str] = None, **kwargs) -> Any:
 
     Note:
         - When prefix="", collision detection ensures no field name conflicts
+        - Short options of nested fields only apply when the composed prefix is ""
         - Mixed flat and nested fields are fully supported
-        - Nested dataclass must have defaults for all fields or use default_factory
-        - Only single-level nesting is currently supported
+        - Nesting works at any depth; prefixes compose (--outer-inner-field)
+        - Give the field a default_factory so it has a value when no source
+          sets it; required fields of the nested class must then be supplied
+          by a config source or the CLI
     """
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_nested"] = True
     metadata["cli_nested_prefix"] = prefix
     field_kwargs["metadata"] = metadata
@@ -151,7 +169,7 @@ def cli_help(help_text: str, **kwargs) -> Any:
             port: int = cli_help("Database port number", default=5432)
     """
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_help"] = help_text
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
@@ -169,7 +187,7 @@ def cli_short(short: str, **kwargs) -> Any:
         Field object with short option metadata
 
     Raises:
-        ValueError: If short is not a single character
+        ValueError: If short is not a single character, or is '-' or whitespace
 
     Example:
         @dataclass
@@ -184,9 +202,11 @@ def cli_short(short: str, **kwargs) -> Any:
     """
     if not isinstance(short, str) or len(short) != 1:
         raise ValueError(f"Short option must be a single character, got: {repr(short)}")
+    if short == "-" or short.isspace():
+        raise ValueError(f"Short option can't be '-' or whitespace, got: {repr(short)}")
 
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_short"] = short
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
@@ -208,17 +228,27 @@ def cli_override_name(name: str, **kwargs) -> Any:
     Returns:
         Field object with override name metadata
 
+    Raises:
+        ValueError: If name is empty, starts with '-' or contains whitespace
+
     Example:
         @dataclass
         class Config:
-            sandbox_config: dict = field(default_factory=dict)              # → --sc (auto)
-            skills_config: dict = cli_override_name("sk", default_factory=dict)  # → --sk (explicit)
+            # → --sc (auto)
+            sandbox_config: dict = field(default_factory=dict)
+            # → --sk (explicit)
+            skills_config: dict = cli_override_name("sk", default_factory=dict)
     """
     if not isinstance(name, str) or not name:
         raise ValueError(f"Override name must be a non-empty string, got: {repr(name)}")
+    if name.startswith("-") or any(c.isspace() for c in name):
+        raise ValueError(
+            "Override name is given without the leading '--' and can't contain "
+            f"whitespace, got: {repr(name)}"
+        )
 
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_override_name"] = name
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
@@ -248,7 +278,7 @@ def cli_choices(choices: List[Any], **kwargs) -> Any:
         raise ValueError("cli_choices requires at least one choice")
 
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_choices"] = list(choices)  # Convert to list for consistency
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
@@ -258,7 +288,8 @@ def cli_file_loadable(**kwargs) -> Any:
     """
     Mark a string field as file-loadable via '@' prefix.
 
-    When a CLI argument value starts with '@', the remaining part is treated as a file path.
+    When a CLI argument value starts with '@', the remaining part is treated as a file
+    path.
     The file is read as UTF-8 encoded text and used as the field value.
 
     Home directory expansion is supported: '~' expands to the user's home directory.
@@ -270,11 +301,12 @@ def cli_file_loadable(**kwargs) -> Any:
         Field object with file-loadable metadata
 
     Note:
-        Only fields marked with cli_file_loadable() will process '@' as a file loading trigger.
+        Only fields marked with cli_file_loadable() will process '@' as a file loading
+        trigger.
         Regular string fields will treat '@' as a literal character.
     """
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_file_loadable"] = True
     field_kwargs["metadata"] = metadata
     return field(**field_kwargs)
@@ -288,7 +320,8 @@ def _validate_append_args(
     if nargs is not None and (min_args is not None or max_args is not None):
         raise ValueError(
             "cli_append: 'nargs' and 'min_args'/'max_args' are mutually exclusive. "
-            "Use either nargs for standard argparse behavior, or min_args/max_args for range validation."
+            "Use either nargs for standard argparse behavior, or min_args/max_args "
+            "for range validation."
         )
 
     # Validate min_args/max_args must be used together
@@ -353,7 +386,7 @@ def cli_append(
     _validate_append_args(nargs, min_args, max_args)
 
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_append"] = True
 
     optional_metadata = {
@@ -395,7 +428,7 @@ def cli_extend(**kwargs) -> Any:
         - Use cli_append(nargs=...) to keep each occurrence as a sub-list
     """
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_extend"] = True
 
     # Move 'help' to metadata if present (dataclass field() doesn't accept it)
@@ -460,7 +493,7 @@ def cli_list_merge(mode: str, paths: Optional[List[str]] = None, **kwargs) -> An
     _validate_list_merge_paths(paths)
 
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_list_merge"] = {
         "mode": mode,
         "paths": list(paths) if paths else None,
@@ -542,7 +575,7 @@ def cli_resolve(resolver: Callable[[Any], Any], **kwargs) -> Any:
         )
 
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_resolve"] = True
     metadata["cli_resolver"] = resolver
     field_kwargs["metadata"] = metadata
@@ -583,7 +616,7 @@ def combine_annotations(*annotations, **field_kwargs) -> Any:
                 default='us-east'
             )
     """
-    combined_metadata = field_kwargs.pop("metadata", {})
+    combined_metadata = _own_metadata(field_kwargs)
 
     # Extract metadata from each annotation
     for annotation in annotations:
@@ -621,10 +654,11 @@ def cli_positional(
         Field object with positional metadata
 
     See Also:
-        POSITIONAL_LIST_CONFLICTS.md for detailed discussion of constraints
+        docs/research/POSITIONAL_LIST_CONFLICTS.md for a detailed discussion
+        of these constraints
     """
     field_kwargs = kwargs.copy()
-    metadata = field_kwargs.pop("metadata", {})
+    metadata = _own_metadata(field_kwargs)
     metadata["cli_positional"] = True
 
     if nargs is not None:

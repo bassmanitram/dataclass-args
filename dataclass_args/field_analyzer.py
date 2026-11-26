@@ -154,6 +154,12 @@ class FieldAnalyzer:
     def should_include_field(self, field_name: str, field_info: Dict[str, Any]) -> bool:
         """Determine if a field should be included in CLI arguments."""
 
+        # init=False fields can't be passed to the constructor, so they can't
+        # be configured at all
+        field_obj = field_info.get("field_obj")
+        if field_obj is not None and not field_obj.init:
+            return False
+
         # Apply annotation filter
         if is_cli_excluded(field_info):
             return False
@@ -372,7 +378,8 @@ class FieldAnalyzer:
 
         A field leaf is a non-cli_nested field at the top level or under a chain
         of cli_nested fields (``name``, ``mid.w``, ``mid.inner.opts``). All
-        fields are included, cli_exclude fields too.
+        init=True fields are included, cli_exclude fields too; init=False
+        fields can't be configured, so they are left out.
         """
         leaves: Dict[Tuple[str, ...], Any] = {}
         self._collect_field_leaves(self.config_class, (), leaves)
@@ -384,10 +391,12 @@ class FieldAnalyzer:
         prefix: Tuple[str, ...],
         leaves: Dict[Tuple[str, ...], Any],
     ) -> None:
-        """Add the field leaves of `config_class` (and nested classes) under `prefix`."""
+        """Add the field leaves of `config_class` (and nested ones) under `prefix`."""
         analyzer = FieldAnalyzer(config_class)
         type_hints = get_type_hints(config_class)
         for field_obj in fields(config_class):
+            if not field_obj.init:
+                continue
             info = analyzer._analyze_single_field(field_obj, type_hints)
             path = prefix + (field_obj.name,)
             if info["is_nested_dataclass"]:
@@ -559,8 +568,9 @@ class FieldAnalyzer:
                 f"'{name}' (nargs='{nargs}')" for name, nargs in positional_list_fields
             ]
             raise ConfigBuilderError(
-                f"Only one positional list argument allowed, found {len(positional_list_fields)}: "
-                f"{', '.join(field_names)}. Use optional lists with flags for additional lists:\n"
+                "Only one positional list argument allowed, found "
+                f"{len(positional_list_fields)}: {', '.join(field_names)}. "
+                "Use optional lists with flags for additional lists:\n"
                 f"  Example: field: List[str] = cli_short('f')  # Use --field instead"
             )
 
@@ -599,10 +609,13 @@ class FieldAnalyzer:
                 name for name, _ in positional_fields[list_field_index + 1 :]
             ]
             raise ConfigBuilderError(
-                f"Positional list argument '{list_field_name}' (nargs='{list_nargs}') must be last.\n"
-                f"Found positional argument(s) after it: {', '.join([repr(f) for f in later_fields])}.\n"
+                f"Positional list argument '{list_field_name}' "
+                f"(nargs='{list_nargs}') must be last.\n"
+                "Found positional argument(s) after it: "
+                f"{', '.join(repr(f) for f in later_fields)}.\n"
                 f"Consider making them optional arguments with flags:\n"
-                f"  Example: {later_fields[0]}: str = cli_short('{later_fields[0][0]}', default='value')"
+                f"  Example: {later_fields[0]}: str = "
+                f"cli_short('{later_fields[0][0]}', default='value')"
             )
 
     def _find_positional_list_index(
@@ -667,7 +680,8 @@ class FieldAnalyzer:
         self, config_fields: Dict[str, Dict[str, Any]]
     ) -> None:
         """
-        Validate that there are no field name collisions when flattening nested dataclasses.
+        Validate that there are no field name collisions when flattening nested
+        dataclasses.
 
         Raises:
             ConfigBuilderError: If collisions are detected
@@ -752,7 +766,8 @@ class FieldAnalyzer:
         self, config_fields: Dict[str, Dict[str, Any]]
     ) -> None:
         """
-        Validate that there are no short option collisions when nested fields have no prefix.
+        Validate that there are no short option collisions when nested fields have no
+        prefix.
 
         Short options are only checked for nested fields with empty prefix (prefix="").
         Nested fields with non-empty prefix do not support short options.
@@ -946,7 +961,7 @@ class FieldAnalyzer:
         ancestors: list,
         steps: list,
     ) -> None:
-        """Depth-first walk over nested dataclass fields, tracking the ancestor chain."""
+        """Depth-first walk over nested dataclass fields, tracking the ancestors."""
         for field_name, info in config_fields.items():
             if not info.get("is_nested_dataclass", False):
                 continue

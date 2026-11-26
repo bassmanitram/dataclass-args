@@ -676,11 +676,13 @@ database: DatabaseConfig = cli_nested(default_factory=DatabaseConfig)
 # CLI: --database-host, --database-port (field name as prefix)
 ```
 
+Underscores in a prefix are currently kept in the positive option (`primary_db: DatabaseConfig = cli_nested(...)` gives `--primary_db-host`), while negative boolean flags hyphenate them (`--no-primary-db-ssl`). Normalising prefixes to hyphens is planned; see [FUTURE_CHANGES.md](FUTURE_CHANGES.md).
+
 #### Short Options with Nested Fields
 
 Short options behave differently based on the prefix:
 
-**With Prefix** → Short options are **ignored** (prevents conflicts):
+**With Prefix** → Short options are **ignored**, for every field type including booleans (so the same dataclass can be nested twice without clashes):
 ```python
 @dataclass
 class ServerConfig:
@@ -975,6 +977,7 @@ $ python app.py --plugins "plugins/*.json" "extra/*.yaml"
 |-------------|--------------|
 | `None` | Resolver NOT called, field stays `None` |
 | Dict (from config/file) | Resolver called, result assigned to field |
+| A string that isn't a path to an existing file (from the CLI or a config source) | Resolver called with the string |
 | Pre-built object (programmatic) | Resolver called, can pass through unchanged |
 | Property overrides on non-dict | `ConfigurationError` raised |
 
@@ -1066,6 +1069,8 @@ config = {
 server = instantiate(config)
 # server.database is automatically instantiated as a Database object
 ```
+
+Nested dicts (and list elements) are instantiated only when they carry a dispatch key (`_target_`, or `type` with a registry). A plain nested dict is passed to the constructor as a dict, whatever the parameter's type annotation. Annotations are used for one thing: a string argument whose parameter is annotated with a class is looked up in the registry.
 
 **Dispatch Rules:**
 1. `None` → returns `None`
@@ -1188,7 +1193,7 @@ For advanced use cases, provide base configuration programmatically using the `b
 config = build_config(AppConfig, base_configs='defaults.yaml')
 
 # Single configuration dict
-config = build_config(AppConfig, base_configs={'debug': True, 'count': 50})
+config = build_config(AppConfig, base_configs={'name': 'app', 'count': 50})
 
 # List mixing files and dicts (applied in order)
 config = build_config(
@@ -1196,7 +1201,7 @@ config = build_config(
     args=['--config', 'user.yaml', '--name', 'override'],
     base_configs=[
         'company-defaults.yaml',      # Company-wide defaults
-        {'environment': 'production'}, # Programmatic override
+        {'region': 'eu-west-1'},      # Programmatic override
         'team-overrides.json',        # Team-specific settings
     ]
 )
@@ -1204,7 +1209,7 @@ config = build_config(
 
 **Merge order for the list example:**
 1. `company-defaults.yaml` (loaded and applied first)
-2. `{'environment': 'production'}` (overrides company defaults)
+2. `{'region': 'eu-west-1'}` (overrides company defaults)
 3. `team-overrides.json` (loaded and overrides previous)
 4. `user.yaml` (from `--config`, overrides all base_configs)
 5. `--name 'override'` (CLI arg, highest priority)
@@ -1382,7 +1387,7 @@ config = build_config(
     base_configs=[
         'config/base.yaml',           # Company-wide defaults
         f'config/{env}.yaml',         # Environment-specific (dev/staging/prod)
-        {'debug': True},              # Quick programmatic toggle
+        {'instance_count': 2},        # Quick programmatic toggle
     ]
 )
 
@@ -1403,7 +1408,7 @@ print(f"Deploying {config.app_name} to {config.environment}")
 
 2. **Testing with fixtures:**
    ```python
-   test_config = {'database': 'test_db', 'debug': True}
+   test_config = {'region': 'test-region', 'count': 1}
    config = build_config(
        AppConfig,
        args=['--name', 'test-run'],
@@ -1418,10 +1423,12 @@ print(f"Deploying {config.app_name} to {config.environment}")
        base_configs=[
            'company.yaml',      # Company defaults
            'team.yaml',         # Team overrides
-           '~/.myapp/personal.yaml',  # Personal settings
+           '~/.myapp/personal.yaml',  # Personal settings (~ is expanded)
        ]
    )
    ```
+
+Every config file (in `base_configs`, `--config`, or given for a dict field) must hold a mapping at its top level; a list or a bare value raises `ConfigurationError`. A leading `~` in the path is expanded to the home directory. Relative paths, including `@file` references inside a config file, are resolved against the current working directory, not the config file's directory.
 
 #### Complete Example
 
@@ -1513,6 +1520,13 @@ class Config:
 
 Without the annotation, both fields would generate `--sc`, causing a `ConfigBuilderError` at init time with a message suggesting the fix.
 
+A string given for a dict field (on the command line, or as a value in `base_configs`, `--config` or `build_config_from_dict`) is handled the same way everywhere:
+- the path of an **existing file**, of any extension, is loaded like a `--config` file (format detected from the content);
+- a missing `.json`/`.yaml`/`.yml`/`.toml` path is a "file not found" error;
+- any other string raises `ConfigurationError`.
+
+Fields annotated with `cli_resolve()` receive any other string unchanged.
+
 ### Programmatic Usage
 
 For non-CLI contexts use `build_config_from_dict()` to build a dataclass instance directly from a dictionary:
@@ -1540,7 +1554,7 @@ config = build_config_from_dict(
     {"port": 9000},                          # Highest priority
     base_configs=[
         "company-defaults.yaml",             # Lowest priority
-        {"environment": "staging"},          # Middle priority
+        {"app_name": "staging-api"},         # Middle priority
     ],
 )
 ```
@@ -1559,7 +1573,7 @@ config = build_config_from_dict(
 - Only accepts `Dict[str, Any]` — raises `TypeError` for non-dict inputs
 
 **What does NOT apply via dict:**
-- `cli_choices()` validation — argparse enforces choices; dict bypasses that
+- `cli_choices()` validation. Choices are enforced by argparse, so they apply only to command-line values; values from a dict, `base_configs` or `--config` aren't checked against them
 
 **See also:** [`examples/programmatic_example.py`](examples/programmatic_example.py) for complete working examples.
 
@@ -1667,7 +1681,7 @@ output: str = cli_positional(nargs='?', default='stdout')
 files: List[str] = cli_positional(nargs='+', help="Files")
 
 # Exact count
-coords: List[float] = cli_positional(nargs=2, metavar='X Y')
+coords: List[float] = cli_positional(nargs=2, metavar='COORD')  # usage: COORD COORD
 
 # Combined with other annotations
 input: str = combine_annotations(
@@ -1678,7 +1692,7 @@ input: str = combine_annotations(
 
 **Important:** At most one positional can use `nargs='*'` or `'+'`, and it must be the last positional.
 
-#### `cli_nested(prefix=None, default_factory=None, **kwargs)`
+#### `cli_nested(prefix=None, **kwargs)`
 
 Mark a dataclass field as a nested configuration that should be flattened into CLI arguments.
 
@@ -1697,8 +1711,9 @@ logging: LogConfig = cli_nested(default_factory=LogConfig)
 ```
 
 **Important:**
-- Fields with prefixes don't support short options
+- Fields with prefixes don't support short options (booleans included)
 - Fields without prefix (prefix="") support short options
+- Underscores in a prefix are kept in positive options (`my_db` → `--my_db-host`); hyphenation is planned ([FUTURE_CHANGES.md](FUTURE_CHANGES.md))
 - Automatic collision detection for field names and short options
 - Works seamlessly with config file merging
 
@@ -1780,11 +1795,16 @@ Dataclass CLI supports standard Python types:
 | `int` | Parsed as integer | `--count 42` |
 | `float` | Parsed as float | `--rate 0.1` |
 | `bool` | Flag with negative | `--debug` or `--no-debug` |
-| `List[T]` | Multiple values after one flag; elements converted to `T` for `int`/`float`/`str` (a repeated flag keeps the last occurrence unless `cli_extend()`) | `--items a b c` |
-| `Dict[str, Any]` | Dict or structured file + property overrides | `--model-config m.json --mc temperature:0.9 --mc tags.0:new` |
-| `Optional[T]` | Optional parameter | `--timeout 30` (or omit) |
+| `List[T]` / `list[T]` / `list` | Multiple values after one flag; elements converted to `T` for `int`/`float`/`str` (strings for a bare `list`; a repeated flag keeps the last occurrence unless `cli_extend()`) | `--items a b c` |
+| `Dict[str, Any]` / `dict` | A dict, or the path of an existing structured file (format detected from the content), plus property overrides; any other string is an error | `--model-config m.json --mc temperature:0.9 --mc tags.0:new` |
+| `Optional[T]` | Same as `T`; the option may be omitted | `--timeout 30` (or omit) |
+| `Union[A, B]` | The value as typed, as a **string** (also for `Optional[Union[A, B]]` and `A \| B \| None`) | `--port-or-name 8080` |
 | `Path` | The path as typed, as a **string** (not converted to `Path`) | `--output /path/to/file` |
 | Custom types | String representation | `--custom "value"` |
+
+Values from config files and `base_configs` are used as loaded (YAML/JSON/TOML types); they are not converted to the field type. Fields declared with `field(init=False)` can't be passed to the constructor, so they get no CLI option and can't be set from config sources.
+
+Help text (from `cli_help()` or generated) is shown literally: a `%` needs no escaping.
 
 ## Configuration File Formats
 
@@ -1938,7 +1958,7 @@ pytest -v
 
 ### Code Coverage
 
-This project maintains **98%+ code coverage** (branch coverage). Coverage reports are generated automatically when running tests.
+This project maintains **97%+ code coverage** (branch coverage). Coverage reports are generated automatically when running tests.
 
 - **Quick check**: `make coverage`
 - **Detailed report**: See `htmlcov/index.html`
@@ -1957,7 +1977,7 @@ isort dataclass_args/ tests/ examples/
 # Check formatting
 make lint
 black --check dataclass_args/ tests/
-flake8 dataclass_args/ tests/
+flake8 dataclass_args/
 mypy dataclass_args/
 ```
 

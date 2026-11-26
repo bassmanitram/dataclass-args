@@ -2,40 +2,40 @@
 
 ## Overview
 
-This project maintains **97.88%** code coverage with comprehensive testing and branch coverage enabled.
+This project maintains **97.72%** code coverage with comprehensive testing and branch coverage enabled.
 
 ## Current Coverage Statistics (v1.10.1)
 
 | Module | Statements | Missing | Branches | Partial | Coverage |
 |--------|------------|---------|----------|---------|----------|
 | `__init__.py` | 10 | 0 | 0 | 0 | **100.00%** |
-| `annotations.py` | 196 | 1 | 50 | 1 | **99.19%** |
+| `annotations.py` | 202 | 1 | 54 | 1 | **99.22%** |
 | `append_action.py` | 6 | 0 | 0 | 0 | **100.00%** |
-| `argument_registry.py` | 207 | 2 | 74 | 3 | **98.22%** |
+| `argument_registry.py` | 217 | 1 | 80 | 4 | **98.32%** |
 | `builder.py` | 42 | 0 | 10 | 3 | **94.23%** |
-| `cli_overrides.py` | 89 | 0 | 30 | 0 | **100.00%** |
+| `cli_overrides.py` | 91 | 0 | 30 | 0 | **100.00%** |
 | `config_applicator.py` | 102 | 0 | 44 | 0 | **100.00%** |
 | `config_merging.py` | 64 | 1 | 20 | 1 | **97.62%** |
-| `config_resolver.py` | 64 | 0 | 10 | 0 | **100.00%** |
+| `config_resolver.py` | 68 | 0 | 12 | 0 | **100.00%** |
 | `convenience.py` | 97 | 0 | 46 | 9 | **93.71%** |
 | `exceptions.py` | 8 | 0 | 0 | 0 | **100.00%** |
-| `field_analyzer.py` | 309 | 13 | 140 | 6 | **95.32%** |
+| `field_analyzer.py` | 314 | 13 | 144 | 6 | **95.41%** |
 | `file_loading.py` | 40 | 0 | 16 | 0 | **100.00%** |
 | `formatter.py` | 9 | 0 | 4 | 0 | **100.00%** |
-| `instantiate.py` | 174 | 0 | 66 | 0 | **100.00%** |
-| `layer_normalization.py` | 75 | 0 | 26 | 0 | **100.00%** |
+| `instantiate.py` | 178 | 1 | 66 | 1 | **99.18%** |
+| `layer_normalization.py` | 82 | 0 | 30 | 0 | **100.00%** |
 | `merge_strategy.py` | 50 | 0 | 24 | 0 | **100.00%** |
-| `nested_processor.py` | 185 | 3 | 76 | 2 | **98.08%** |
-| `option_collisions.py` | 88 | 3 | 46 | 4 | **94.78%** |
+| `nested_processor.py` | 196 | 5 | 82 | 3 | **97.12%** |
+| `option_collisions.py` | 127 | 5 | 68 | 7 | **93.85%** |
 | `provenance.py` | 202 | 2 | 64 | 2 | **98.50%** |
-| `type_inspector.py` | 64 | 1 | 30 | 3 | **95.74%** |
-| `utils.py` | 108 | 0 | 40 | 0 | **100.00%** |
+| `type_inspector.py` | 65 | 1 | 28 | 2 | **96.77%** |
+| `utils.py` | 142 | 0 | 48 | 0 | **100.00%** |
 | `value_resolution.py` | 72 | 3 | 34 | 1 | **96.23%** |
-| **TOTAL** | **2261** | **29** | **850** | **35** | **97.88%** |
+| **TOTAL** | **2384** | **33** | **904** | **40** | **97.72%** |
 
 ## Test Suite
 
-- **Total Tests:** 1294
+- **Total Tests:** 1353
 - **Test Execution Time:** ~10s
 - **All Tests Passing:** ✅
 - **Python Version:** 3.11+ (tested on 3.11–3.14)
@@ -43,8 +43,8 @@ This project maintains **97.88%** code coverage with comprehensive testing and b
 ## Coverage Requirements
 
 - **Minimum Required:** 88%
-- **Current Coverage:** 97.88% ✅
-- **Modules at 100%:** 12 of 23
+- **Current Coverage:** 97.72% ✅
+- **Modules at 100%:** 11 of 23
 
 ## Coverage History
 
@@ -57,7 +57,7 @@ This project maintains **97.88%** code coverage with comprehensive testing and b
 | v1.8.1 | 675 | 97.74% | +15 tests, major refactor |
 | v1.9.0 | 723 | 97.58% | +48 tests (cli_override_name, list overrides) |
 | v1.10.0 | 1234 | 98.02% | +511 tests (defect fixes, deep merge, layers, list rules, provenance, nesting at any depth) |
-| v1.10.1 | 1294 | 97.88% | +60 tests (list element types, cli_extend) |
+| v1.10.1 | 1353 | 97.72% | +119 tests (list element types, cli_extend, QA review fixes) |
 
 ## Architecture (v1.10.0)
 
@@ -136,7 +136,7 @@ tests/
 
 ## Quality Metrics
 
-- **Test Execution:** Fast (~10s for 1294 tests)
+- **Test Execution:** Fast (~10s for 1353 tests)
 - **Test Reliability:** 100% (no flaky tests)
 - **Cognitive Complexity:** All functions CC≤10
 - **Test Clarity:** High (class-based organization, one class per concern)

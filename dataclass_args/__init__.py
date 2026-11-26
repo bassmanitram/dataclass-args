@@ -28,18 +28,20 @@ Basic Usage:
     config = build_config(Config)  # Automatically parses sys.argv
 
 Advanced Usage:
-    from dataclass_args import cli_help, cli_short, cli_choices, cli_file_loadable
+    from dataclass_args import (
+        cli_choices, cli_file_loadable, cli_help, cli_short, combine_annotations
+    )
 
     @dataclass
     class Config:
-        name: str = cli_short('n', cli_help("Application name"))
+        name: str = combine_annotations(cli_short('n'), cli_help("Application name"))
         environment: str = cli_choices(['dev', 'staging', 'prod'])
         region: str = combine_annotations(
             cli_short('r'),
             cli_choices(['us-east', 'us-west', 'eu-west']),
             default='us-east'
         )
-        message: str = cli_file_loadable()  # Supports @filename loading
+        message: str = cli_file_loadable(default="")  # Supports @filename loading
 
     # Usage: -n MyApp --environment prod -r us-west --message @file.txt
     config = build_config(Config)
@@ -81,8 +83,8 @@ Resolver Usage:
 Instantiation Usage:
     from dataclass_args import instantiate
 
-    # Direct target import
-    obj = instantiate({"_target_": "pathlib.Path", "args": ["/tmp"]})
+    # Direct target import (remaining keys are keyword arguments)
+    obj = instantiate({"_target_": "datetime.timedelta", "hours": 2})
 
     # Registry-based lookup
     registry = {"docker": "myapp.sandboxes.DockerSandbox"}

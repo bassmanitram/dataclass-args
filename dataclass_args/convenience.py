@@ -81,7 +81,8 @@ def build_config_from_cli(
     """
     Build dataclass instance from CLI arguments with optional base configs.
 
-    Configuration sources are merged in the following order (later sources override earlier):
+    Configuration sources are merged in the following order (later sources override
+    earlier):
     1. base_configs (if provided) - files loaded and applied in order
     2. Config file from --config argument (if provided)
     3. CLI argument overrides
@@ -198,7 +199,8 @@ def build_config(
     """
     Simplified convenience function to build dataclass from CLI arguments.
 
-    Configuration sources are merged in the following order (later sources override earlier):
+    Configuration sources are merged in the following order (later sources override
+    earlier):
     1. base_configs (if provided) - files loaded and applied in order
     2. Config file from --config argument (if provided)
     3. CLI argument overrides
@@ -277,7 +279,8 @@ def _route_config_values(
         )
 
         if field_info is None:
-            # Field not in config_fields (e.g., cli_exclude) - route through base_configs
+            # Field not in config_fields (e.g., cli_exclude) - route through
+            # base_configs
             base_config_values[key] = value
         elif field_info.get("is_nested_dataclass"):
             # Nested field - route through base_configs, where the layer
@@ -413,7 +416,8 @@ def build_config_from_dict(
     - cli_resolve() post-load resolution
     - Nested dataclass reconstruction
 
-    Configuration sources are merged in the following order (later sources override earlier):
+    Configuration sources are merged in the following order (later sources override
+    earlier):
     1. base_configs (if provided) - files and/or dicts applied in order
     2. config dict values (highest priority)
 

@@ -78,18 +78,22 @@ class TypeInspector:
         Returns:
             Inner type if Optional, otherwise original type
 
+        Only ``None`` is removed, so ``Optional[X]`` behaves exactly like ``X``:
+        a union with several other members stays a union of those members.
+
         Examples:
             Optional[str] → str
             Union[int, None] → int
             int | None → int  (Python 3.10+)
+            Optional[Union[int, str]] → Union[int, str]
             str → str
         """
         if TypeInspector.is_optional(field_type):
-            origin, args = TypeInspector.get_origin_and_args(field_type)
-            # Return first non-None type
-            for arg in args:
-                if arg is not type(None):
-                    return arg
+            _, args = TypeInspector.get_origin_and_args(field_type)
+            members = tuple(arg for arg in args if arg is not type(None))
+            if len(members) == 1:
+                return members[0]
+            return Union[members]  # type: ignore[return-value]
         return field_type
 
     @staticmethod
@@ -101,10 +105,10 @@ class TypeInspector:
             field_type: Type to check
 
         Returns:
-            True if type is List[T]
+            True if type is List[T], list[T], or a bare ``List`` / ``list``
         """
         origin, _ = TypeInspector.get_origin_and_args(field_type)
-        return origin is list
+        return origin is list or field_type is list
 
     @staticmethod
     def is_dict_type(field_type: Type) -> bool:

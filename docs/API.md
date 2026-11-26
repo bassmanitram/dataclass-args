@@ -257,9 +257,11 @@ class Config:
 **Help Output:**
 ```
 options:
-  --host HOST    Server bind address (default: localhost)
-  --port PORT    Server port number (default: 8000)
+  --host HOST    Server bind address
+  --port PORT    Server port number
 ```
+
+Only boolean flags show their default in help ("(default: False)"); other fields show the help text as given.
 
 ---
 
@@ -284,7 +286,7 @@ Each occurrence of the option collects its arguments, and all occurrences accumu
   - Must be used together with `min_args`
   - Enables clean help text display
 - `metavar` (Optional[str]): Custom display name for arguments in help text
-- `**kwargs`: Field parameters including `default_factory` (required)
+- `**kwargs`: Field parameters; `default_factory=list` is recommended, so an unset field is `[]` rather than a required argument
 
 **Returns:**
 - `Field` with append action metadata
@@ -436,7 +438,7 @@ class Process:
 # Exact count
 @dataclass
 class Point:
-    coordinates: List[float] = cli_positional(nargs=2, metavar='X Y', help="Coordinates")
+    coordinates: List[float] = cli_positional(nargs=2, metavar='COORD', help="Coordinates")  # usage: COORD COORD
 
 # CLI: python plot.py 3.5 7.2
 ```
@@ -448,7 +450,7 @@ class Point:
 
 ---
 
-### `cli_nested(prefix=None, default_factory=None, **kwargs)`
+### `cli_nested(prefix=None, **kwargs)`
 
 Mark a dataclass field as a nested configuration that should be flattened into CLI arguments.
 
@@ -745,7 +747,7 @@ class Config:
 
 ### `cli_include(**kwargs)`
 
-Explicitly mark a dataclass field to be included in CLI arguments. Useful when using custom field filters.
+Explicitly mark a dataclass field as included in CLI arguments. Fields are included by default, so this is a documentation-only marker with no effect on behaviour.
 
 **Parameters:**
 - `**kwargs`: Field parameters (e.g., `default`, `default_factory`)
@@ -924,7 +926,7 @@ Supports:
 - Object parameter file loading with property overrides
 - File-loadable string parameters via '@' prefix
 - Hierarchical merging of configuration sources
-- Field filtering via annotations or custom filters
+- Field filtering via annotations (`cli_exclude`)
 
 **Constructor Parameters:**
 - `config_class` (Type[dataclass]): Dataclass type to build configurations for
@@ -1071,23 +1073,21 @@ except ConfigBuilderError as e:
 
 ### `ConfigurationError`
 
-Exception raised for configuration validation errors.
+Raised for problems with configuration *values*: anything detected while loading and combining sources, or while building the instance.
 
 **Raised when:**
-- Invalid configuration values
-- Type conversion failures
-- Validation errors
+- A config file can't be found or read, or doesn't contain a mapping at its top level
+- A value is invalid for its field: e.g. a string for a dict field that isn't an existing file, a property override on a non-dict value, or an `append` value with the wrong number of arguments
+- A required field has no value from any source ("missing required field: 'name'")
+- `cli_resolve` resolvers or `__post_init__` raise
+
+Invalid **command-line** values (a bad `int`, an invalid choice) are reported by argparse as a usage error (`SystemExit(2)`). Values from config sources aren't type-converted.
 
 ---
 
 ### `FileLoadingError`
 
-Exception raised when file loading fails.
-
-**Raised when:**
-- File not found
-- File read errors
-- Invalid file format
+Raised by `load_file_content()` (the `@file` loader) when a file can't be found or read. During a build, these errors are reported as `ConfigurationError`, with the field named.
 
 ---
 
@@ -1145,10 +1145,11 @@ Automatically detects file format based on extension and attempts to parse.
 - `file_path` (str): Path to the file
 
 **Returns:**
-- `dict`: Parsed file content
+- `dict`: Parsed file content. An empty YAML file gives `{}`.
 
 **Raises:**
-- `FileLoadingError`: If file cannot be loaded or parsed
+- `FileNotFoundError`: the file doesn't exist (`~` is expanded first)
+- `ValueError`: the content can't be parsed, or its top level isn't a mapping
 
 **Supported Formats:**
 - `.json` - JSON files
@@ -1201,7 +1202,7 @@ Construct a Python object from a configuration value using convention-based disp
 - `target_key` (str): Dict key indicating a direct import path. Default: `"_target_"`
 - `type_key` (str): Dict key indicating a registry lookup name. Default: `"type"`
 - `attr_key` (Optional[str]): Dict key indicating post-construction attribute traversal. Set to `None` to disable. Default: `"_attr_"`
-- `recursive` (bool): Whether to recursively resolve nested dicts in kwargs based on `__init__` type annotations. Default: `True`
+- `recursive` (bool): Whether to recursively instantiate nested dicts and list elements that carry a dispatch key (`_target_`, or `type` with a registry). Plain dicts are passed through unchanged. Default: `True`
 - `max_depth` (int): Maximum recursion depth to prevent infinite loops. Default: `10`
 
 **Returns:**
@@ -1268,7 +1269,7 @@ engine = instantiate(config)
 
 **Recursive Resolution:**
 
-Nested dicts are recursively resolved based on the target class's `__init__` type annotations:
+Nested dicts that carry a dispatch key are instantiated recursively. A nested dict without one is passed to the constructor as a plain dict:
 
 ```python
 config = {
@@ -1318,7 +1319,7 @@ Configuration files can be loaded using the `--config` option (automatically add
 **Supported Formats:**
 - JSON (built-in)
 - YAML (requires `pip install "dataclass-args[yaml]"`)
-- TOML (requires `pip install "dataclass-args[toml]"`)
+- TOML (built in via the standard library's `tomllib`)
 
 **Example:**
 
@@ -1381,17 +1382,14 @@ class DatabaseConfig:
 class AppConfig:
     name: str
     debug: bool = False
-    database: Dict[str, Any] = None  # Load from config file
+    database: DatabaseConfig = cli_nested(prefix="db", default_factory=DatabaseConfig)
 
-config = build_config(AppConfig, args=[
-    '--name', 'myapp',
-    '--database', 'db_config.json'
-])
-
-# Convert dict to dataclass
-if config.database:
-    db_config = DatabaseConfig(**config.database)
+config = build_config(AppConfig, args=['--name', 'myapp', '--config', 'app.yaml', '--db-port', '6543'])
+# config.database is a DatabaseConfig instance: values come from app.yaml's
+# "database" section, overridden by --db-port. No manual conversion needed.
 ```
+
+See [`cli_nested`](#cli_nestedprefixnone-kwargs) for prefixes, short options and nesting at any depth.
 
 ### Environment Variable Integration
 
@@ -1402,7 +1400,7 @@ import os
 
 @dataclass
 class Config:
-    api_key: str = os.getenv('API_KEY', '')
+    api_key: str = field(default_factory=lambda: os.getenv('API_KEY', ''))  # read at build time, not import time
     port: int = cli_short('p', default=8000)
 
     def __post_init__(self):

@@ -14,7 +14,9 @@ Dispatch rules (priority order):
 
 Features:
     - _attr_ traversal: post-construction dotted attribute path resolution
-    - Recursive resolution: nested dicts resolved via __init__ type annotations
+    - Recursive resolution: nested dicts (and list elements) that carry a
+      dispatch key are instantiated before the outer object; a string kwarg
+      whose __init__ annotation is a class is looked up in the registry
     - Max depth: configurable limit to prevent infinite recursion
     - Path context: error messages include full resolution path for debugging
 """
@@ -65,8 +67,9 @@ def instantiate(
             Default: "type"
         attr_key: Dict key indicating post-construction attribute traversal.
             Set to None to disable _attr_ processing. Default: "_attr_"
-        recursive: Whether to recursively resolve nested dicts in kwargs
-            based on __init__ type annotations. Default: True
+        recursive: Whether to resolve nested values in kwargs: dicts and list
+            elements carrying a dispatch key, and string kwargs annotated with
+            a class (registry lookup). Default: True
         max_depth: Maximum recursion depth to prevent infinite loops.
             Default: 10
 
@@ -80,7 +83,8 @@ def instantiate(
 
     Examples:
         # Direct target import
-        >>> instantiate({"_target_": "pathlib.Path", "args": ["/tmp"]})
+        >>> instantiate({"_target_": "datetime.timedelta", "hours": 2})
+        datetime.timedelta(seconds=7200)
 
         # Registry lookup
         >>> registry = {"docker": "myapp.DockerSandbox"}
@@ -221,6 +225,15 @@ def _require_string(value: Any, key: str, path: str, description: str = "") -> s
     return value
 
 
+def _pop_attr_path(
+    kwargs: Dict[str, Any], attr_key: Optional[str], path: str
+) -> Optional[str]:
+    """Remove and return the attribute path (a string), or None if absent/disabled."""
+    if not attr_key or attr_key not in kwargs:
+        return None
+    return _require_string(kwargs.pop(attr_key), attr_key, path, " (attribute path)")
+
+
 def _lookup_registry(registry: Dict[str, str], type_name: str, path: str) -> str:
     """Return the class path registered for `type_name`, or raise InstantiationError."""
     if type_name not in registry:
@@ -298,7 +311,7 @@ def _from_dict(
         target_path = _require_string(
             kwargs.pop(target_key), target_key, path, " (class path)"
         )
-        attr_path = kwargs.pop(attr_key, None) if attr_key else None
+        attr_path = _pop_attr_path(kwargs, attr_key, path)
 
         return _construct_from_target(
             kwargs,
@@ -317,7 +330,7 @@ def _from_dict(
     if type_key in config and registry is not None:
         kwargs = dict(config)  # Copy before mutating
         type_name = _require_string(kwargs.pop(type_key), type_key, path)
-        attr_path = kwargs.pop(attr_key, None) if attr_key else None
+        attr_path = _pop_attr_path(kwargs, attr_key, path)
         target_path = _lookup_registry(registry, type_name, path)
 
         return _construct_from_target(
@@ -350,13 +363,13 @@ def _resolve_kwargs(
     path: str,
 ) -> Dict[str, Any]:
     """
-    Recursively resolve kwargs based on target class __init__ annotations.
+    Recursively resolve kwargs before the target class is constructed.
 
-    For each kwarg value that is a dict:
-    - If it contains target_key or type_key (with registry): always resolve
-    - If the corresponding __init__ annotation is a non-builtin class: resolve
-
-    For list values, scan elements for resolvable dicts.
+    - A dict value carrying target_key (or type_key with a registry) is
+      instantiated; any other dict is passed as-is.
+    - List elements are scanned for such dicts.
+    - A string value is looked up in the registry when the matching
+      __init__ annotation is a non-builtin class and the string is a key.
 
     Args:
         kwargs: Keyword arguments to potentially resolve.
@@ -391,7 +404,6 @@ def _resolve_kwargs(
         if isinstance(value, dict):
             resolved[key] = _resolve_dict_value(
                 value,
-                annotation=annotation,
                 registry=registry,
                 target_key=target_key,
                 type_key=type_key,
@@ -437,7 +449,6 @@ def _resolve_kwargs(
 def _resolve_dict_value(
     value: Dict[str, Any],
     *,
-    annotation: Optional[Type],
     registry: Optional[Dict[str, str]],
     target_key: str,
     type_key: str,
@@ -447,11 +458,13 @@ def _resolve_dict_value(
     path: str,
 ) -> Any:
     """
-    Resolve a single dict value, either by explicit keys or annotation.
+    Resolve a single dict kwarg value if it carries a dispatch key.
+
+    A dict without a dispatch key is returned unchanged, whatever the
+    parameter's annotation: the target class receives the plain dict.
 
     Args:
         value: Dict value to potentially resolve.
-        annotation: Type annotation from parent __init__ (if available).
         registry: Type name → class path mapping.
         target_key: Key for direct import path.
         type_key: Key for registry lookup.
@@ -463,24 +476,10 @@ def _resolve_dict_value(
     Returns:
         Resolved object or original dict.
     """
-    # Always resolve if dict has explicit dispatch keys
     has_target = target_key in value
     has_type_with_registry = type_key in value and registry is not None
 
     if has_target or has_type_with_registry:
-        return _instantiate_impl(
-            config=value,
-            registry=registry,
-            target_key=target_key,
-            type_key=type_key,
-            attr_key=attr_key,
-            recursive=recursive,
-            max_depth=max_depth,
-            path=path,
-        )
-
-    # Resolve if annotation is a non-builtin class type
-    if annotation is not None and _is_instantiable_type(annotation):
         return _instantiate_impl(
             config=value,
             registry=registry,
@@ -581,15 +580,22 @@ def _import_target(target_path: str, *, path: str) -> Type:
 
     try:
         module = importlib.import_module(module_path)
-    except (ImportError, ModuleNotFoundError) as exc:
+    except ImportError as exc:
         # Try splitting further — the module might be shorter
-        # e.g., "package.module.Class.method" → module="package.module", attrs="Class.method"
+        # e.g., "package.module.Class.method" → module="package.module",
+        # attrs="Class.method"
         resolved = _try_import_nested(target_path, path=path)
         if resolved is not None:
             return resolved
         raise InstantiationError(
             f"Failed to import module '{module_path}' "
             f"from target '{target_path}' (at '{path}'): {exc}"
+        ) from exc
+    except Exception as exc:  # the module exists but raised while importing
+        raise InstantiationError(
+            f"Error while importing module '{module_path}' "
+            f"from target '{target_path}' (at '{path}'): "
+            f"{type(exc).__name__}: {exc}"
         ) from exc
 
     try:
@@ -632,7 +638,7 @@ def _try_import_nested(target_path: str, *, path: str) -> Optional[Any]:
 
         try:
             module = importlib.import_module(module_path)
-        except (ImportError, ModuleNotFoundError):
+        except ImportError:
             continue
 
         # Traverse attributes

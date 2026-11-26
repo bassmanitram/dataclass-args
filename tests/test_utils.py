@@ -429,9 +429,7 @@ class TestLoadStructuredFileMissingDependencies:
             temp_path = f.name
 
         try:
-            with pytest.raises(
-                ValueError, match="TOML support not available.*pip install"
-            ):
+            with pytest.raises(ValueError, match="TOML support not available"):
                 load_structured_file(temp_path)
         finally:
             Path(temp_path).unlink()

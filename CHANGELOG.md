@@ -5,9 +5,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [1.10.1] - 2026-11-25
+## [1.10.1] - 2026-11-26
+
+This release also includes the fixes from an independent QA review of the whole project.
+
+### Changed (please read before upgrading)
+- **A string given for a plain dict field is now either a file or an error, from every source.** This covers the command line (top level and nested), `base_configs`, `ConfigLayer`, `--config` values and `build_config_from_dict`.
+  - The path of an **existing file** is loaded like a `--config` file, with the format detected from the content.
+  - A missing `.json`/`.yaml`/`.yml`/`.toml` path is a "file not found" error.
+  - Any other string raises `ConfigurationError`, naming the field (and the layer).
+
+  Previously a non-file string was silently stored as a `str` in a `Dict` field, and existing files without a structured extension weren't loaded. Fields using `cli_resolve()` still receive other strings unchanged.
+- `Optional[Union[A, B]]` now behaves exactly like `Union[A, B]`: the command-line value stays a string. Previously it was converted to `A` alone, so `Optional[Union[int, str]]` rejected `abc`. A union that includes a list follows the same rule.
+- Fields declared with `field(init=False)` no longer get a command-line option. Setting one always crashed, because the constructor doesn't accept it.
+- Booleans in **prefixed** nested dataclasses no longer get their `cli_short` option, as the README documents for every other field type. This also means one dataclass with a short-option boolean can be nested under two prefixes, which previously failed with a collision error.
+- **Error message wording changed:**
+  - a missing field is now "missing required field: 'name'" instead of Python's "missing 1 required positional argument";
+  - `@file` errors no longer repeat their prefix;
+  - the `base_configs` type error lists `ConfigLayer`.
 
 ### Fixed
+- **A field whose name starts with `_` silently ignored its command-line value** (`---count 7` left the default). Every argument is now registered with an explicit destination.
+- **Two arguments sharing one Namespace attribute overwrote each other silently.** For example, a positional named `config` was read as the `--config` option, and an override name equal to a field name clashed with that field. This is now a `ConfigBuilderError`, naming both.
+- A `%` in help text or in a choice crashed `--help`.
+- A bare `list` annotation was treated as a single string.
+- `~` wasn't expanded in config-file paths (`base_configs`, `--config` and dict-field files), although the README relied on it.
+- A config file whose top level isn't a mapping gave a cryptic error, and a YAML `false` or `0` silently became `{}`. Both now give a clear error.
+- A required boolean's help showed "(default: None)".
+- Nested boolean help text now uses the dotted field path, like other nested fields.
+- `cli_short('-')`, whitespace, and `cli_override_name()` with leading dashes are rejected at annotation time.
+- Annotations no longer mutate a `metadata=` dict passed in by the caller. A read-only mapping such as `MappingProxyType` now works.
+- `instantiate()`:
+  - a non-string `_attr_`, and exceptions other than `ImportError` raised while importing a target module, are now wrapped in `InstantiationError`;
+  - unreachable "annotation-guided" code was removed. Behaviour is unchanged, and the docs now describe the actual rule.
 - **Repeated list flags silently dropped earlier values.** With a plain `List[T]` option, `-t a -t b` kept only `['b']`, while the help text ("specify one or more values") invited repeating the flag. The new opt-in **`cli_extend()`** annotation makes repeats accumulate into one flat list:
   - `-t a -t b` → `['a', 'b']`; `-t a b -t c` → `['a', 'b', 'c']`.
   - An omitted flag leaves earlier sources and the default untouched. A given flag replaces earlier sources as a whole, as list CLI values always have.
@@ -19,11 +49,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `List[int]` with `cli_choices([1, 2, 3])` rejected every value, because the string `'1'` never equals `1`. It now works.
 
 ### Documentation
+- Corrected wrong or stale statements across README, API.md, QUICKSTART.md and AGENT_BOOTSTRAP.md:
+  - examples that passed keys their dataclass doesn't have;
+  - signatures (`cli_nested`);
+  - help-output samples (non-bool fields never show defaults; QUICKSTART's help block was regenerated from real output);
+  - `metavar='X Y'`, which renders as `X Y X Y`;
+  - TOML now being built in;
+  - the exceptions `load_structured_file`, `FileLoadingError` and `ConfigurationError` actually raise;
+  - `cli_include` being a marker with no effect;
+  - `cli_choices` applying to command-line values only;
+  - `instantiate()` resolution rules.
+- New `FUTURE_CHANGES.md` records accepted changes deferred to a later release: hyphenating nested prefixes, converting `Path`/`Enum` values, and others.
 - Corrected the type tables. `Path` and `Enum` CLI values are passed through **as strings**; the tables claimed `Path(...)` and `Enum` members. Converting them (consistently for CLI and config-file values) is planned for a future minor release.
 - Added `cli_extend` to README and API.md, and listed it in the compatibility notes for `cli_resolve` and `cli_list_merge`.
 
+### Development
+- Removed the unused `[tool.flake8]` table from `pyproject.toml`; it contradicted `.flake8`, which is the only flake8 configuration flake8 reads.
+
 ### Tests
-- 1294 tests (up from 1234), with 97.88% coverage, on Python 3.11–3.14. No existing test's logic or assertions changed; two tests and one test class were renamed to neutral names.
+- 1353 tests (up from 1234), with 97.72% coverage, on Python 3.11–3.14.
+- Existing tests changed: two tests and one test class renamed to neutral names; tests that pinned a behaviour fixed above (dict-field strings, `Optional[Union]`, message wording) updated to the new behaviour; one test skipped when run as root (a mode-000 file is readable by root).
 
 ## [1.10.0] - 2026-11-24
 

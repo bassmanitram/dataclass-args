@@ -73,14 +73,16 @@ class TestFileLoadingFunctions:
             temp_path = f.name
 
         try:
-            # Remove read permissions (skip on Windows where this doesn't work the same)
-            if os.name != "nt":
-                os.chmod(temp_path, 0o000)
-
-                with pytest.raises(FileLoadingError, match="File is not readable"):
-                    load_file_content(temp_path)
-            else:
+            # Remove read permissions. Skipped on Windows (permission handling
+            # differs) and as root (root can read a mode-000 file).
+            if os.name == "nt":
                 pytest.skip("Permission handling differs on Windows")
+            if os.geteuid() == 0:
+                pytest.skip("root can read files without read permission")
+            os.chmod(temp_path, 0o000)
+
+            with pytest.raises(FileLoadingError, match="File is not readable"):
+                load_file_content(temp_path)
         finally:
             # Restore permissions and clean up
             if os.name != "nt":
@@ -115,8 +117,8 @@ class TestFileLoadingFunctions:
             process_file_loadable_value("@", "test_field")
 
     def test_process_file_loadable_value_file_error(self):
-        """Test error propagation from file loading."""
-        with pytest.raises(ValueError, match="Failed to process field"):
+        """Test error propagation from file loading (callers add field context)."""
+        with pytest.raises(ValueError, match="^File not found: /nonexistent/file.txt$"):
             process_file_loadable_value("@/nonexistent/file.txt", "test_field")
 
 

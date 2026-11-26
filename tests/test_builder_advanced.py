@@ -462,7 +462,9 @@ class TestBuilderCoverageGaps:
         class Config:
             name: str = "default"
 
-        with pytest.raises(ConfigurationError, match="must be str, dict, or list"):
+        with pytest.raises(
+            ConfigurationError, match="must be str, dict, ConfigLayer, or list"
+        ):
             build_config(Config, args=["--name", "x"], base_configs=123)
 
     def test_append_bare_list_list_type_fallback(self):

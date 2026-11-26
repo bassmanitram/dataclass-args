@@ -424,9 +424,10 @@ def test_NN_dict_cli_file_then_override_at_depth(tmp_path):
     assert result.mid.inner.opts == {"n": 1, "z": 3}
 
 
-def test_NN_dict_cli_non_file_string_passes_through_at_depth():
-    result = build_config(Top, ["--mid-inner-opts", "plain"])
-    assert result.mid.inner.opts == "plain"
+def test_NN_dict_cli_non_file_string_rejected_at_depth():
+    with pytest.raises(ConfigurationError) as exc:
+        build_config(Top, ["--mid-inner-opts", "plain"])
+    assert "Invalid value 'plain' for dict field 'mid.inner.opts'" in str(exc.value)
 
 
 def test_NN_dict_override_at_depth_on_non_dict_raises():
@@ -434,7 +435,7 @@ def test_NN_dict_override_at_depth_on_non_dict_raises():
         build_config(
             Top,
             ["--mid-inner-o", "y:2"],
-            base_configs={"mid": {"inner": {"opts": "plain"}}},
+            base_configs={"mid": {"inner": {"opts": 5}}},
         )
     assert "mid.inner.opts" in str(exc.value)
     assert "not a dict" in str(exc.value)

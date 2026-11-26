@@ -209,9 +209,9 @@ class TestUnwrapOptionalEdgeCases:
         assert result == str
 
     def test_unwrap_optional_multi_type_union_unchanged(self):
-        """Union[int, str, None] with multiple non-None types returns unchanged."""
+        """Union[int, str, None] keeps every non-None member: Union[int, str]."""
         multi = Union[int, str, None]
         result = TypeInspector.unwrap_optional(multi)
-        # Has 2 non-None types, so returned unchanged (first non-None)
-        # Actually, unwrap_optional returns the FIRST non-None type
-        assert result in (int, str)
+        # Only None is removed, so Optional[X] behaves exactly like X
+        assert result == Union[int, str]
+        assert TypeInspector.unwrap_optional(int | str | None) == Union[int, str]

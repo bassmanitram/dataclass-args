@@ -445,10 +445,10 @@ def test_F5_stage6_safety_net_rejects_non_dict_value():
 
 def test_E1_property_override_on_plain_string_dict_field():
     with pytest.raises(ConfigurationError) as exc:
-        build_config(C, ["--d", "port:5"], base_configs={"db": "plainstring"})
+        build_config(C, ["--d", "port:5"], base_configs={"db": 5})
     message = str(exc.value)
     assert "Cannot apply property overrides to field 'db'" in message
-    assert "str" in message
+    assert "int" in message
 
 
 def test_E1_set_nested_property_names_offending_prefix():
@@ -494,10 +494,10 @@ def test_layer_normalizer_loads_top_level_dict_field(db_file):
 
 
 def test_layer_normalizer_leaves_other_values_unchanged():
-    layer = {"db": "plain", "name": "n.yaml", "unknown": "u.yaml", "tags": ["t.yaml"]}
+    layer = {"db": 5, "name": "n.yaml", "unknown": "u.yaml", "tags": ["t.yaml"]}
     _normalizer(C).normalize(layer, "L")
     assert layer == {
-        "db": "plain",
+        "db": 5,
         "name": "n.yaml",
         "unknown": "u.yaml",
         "tags": ["t.yaml"],
@@ -668,7 +668,7 @@ def test_P_nested_override_on_instance_base_does_not_mutate_it():
 
 def test_P_nested_override_on_non_dict_raises():
     with pytest.raises(ConfigurationError) as exc:
-        build_config(App, ["--db-o", "y:2"], base_configs={"db": {"opts": "plainstr"}})
+        build_config(App, ["--db-o", "y:2"], base_configs={"db": {"opts": 5}})
     message = str(exc.value)
     assert "db.opts" in message
     assert "not a dict" in message
@@ -712,9 +712,13 @@ def test_P6_nested_cli_file_load_error_names_nested_field():
     assert "'db.opts'" in str(exc.value)
 
 
-def test_P7_nested_non_file_string_passes_through():
-    result = build_config(App, ["--db-opts", "plainstr"])
-    assert result.db.opts == "plainstr"
+def test_P7_nested_non_file_string_is_rejected_for_plain_dict_field():
+    # A plain dict field can't hold a string: only a path to a configuration
+    # file (or a cli_resolve field, whose resolver may accept strings) is valid
+    with pytest.raises(ConfigurationError) as exc:
+        build_config(App, ["--db-opts", "plainstr"])
+    assert "Invalid value 'plainstr' for dict field 'db.opts'" in str(exc.value)
+    assert "cli_resolve()" in str(exc.value)
 
 
 def test_P_nested_cli_dict_value_merges_onto_layer_value():

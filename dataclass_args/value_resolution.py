@@ -70,7 +70,8 @@ class ValueResolver:
             if info.get("is_nested_dataclass", False):
                 continue
 
-            # Skip if CLI already provided a value (it was processed in apply_cli_overrides)
+            # Skip if CLI already provided a value (it was processed in
+            # apply_cli_overrides)
             cli_value = self._get_cli_value(args, field_name)
             if cli_value is not None:
                 continue
@@ -163,14 +164,16 @@ class ValueResolver:
             raise ConfigurationError(
                 f"Field '{field_name}' occurrence #{index+1}: "
                 f"Expected at least {min_args} argument(s), got {arg_count}. "
-                f"Each occurrence must have between {min_args} and {max_args} argument(s)."
+                f"Each occurrence must have between {min_args} and {max_args} "
+                "argument(s)."
             )
 
         if arg_count > max_args:
             raise ConfigurationError(
                 f"Field '{field_name}' occurrence #{index+1}: "
                 f"Expected at most {max_args} argument(s), got {arg_count}. "
-                f"Each occurrence must have between {min_args} and {max_args} argument(s)."
+                f"Each occurrence must have between {min_args} and {max_args} "
+                "argument(s)."
             )
 
     def resolve_fields(self, config_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -187,7 +190,8 @@ class ValueResolver:
             Configuration dictionary with resolved field values
 
         Raises:
-            ConfigurationError: If resolver raises an exception (wraps non-ConfigurationError)
+            ConfigurationError: If resolver raises an exception (wraps
+                non-ConfigurationError)
         """
         for field_name, info in self.config_fields.items():
             if not is_cli_resolve(info):

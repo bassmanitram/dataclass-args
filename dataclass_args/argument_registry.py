@@ -54,7 +54,17 @@ from .append_action import RangeAppendAction
 from .exceptions import ConfigBuilderError
 from .field_analyzer import FieldAnalyzer, compose_override_name
 from .nested_processor import mapping_source
-from .option_collisions import check_option_collisions, plan_option_strings
+from .option_collisions import (
+    check_dest_collisions,
+    check_option_collisions,
+    plan_option_strings,
+)
+from .utils import (
+    cli_name_to_dest,
+    escape_help,
+    flattened_field_name,
+    negative_flag_name,
+)
 
 
 class _ChoicesAllowingNothing(List[Any]):
@@ -118,7 +128,8 @@ class ArgumentRegistry:
         # Get flattened fields (handles nested dataclasses)
         flat_fields = self.field_analyzer.flatten_nested_fields(self.config_fields)
 
-        # Fail fast on any option-string clash, before registering anything
+        # Fail fast on any option-string or destination clash, before
+        # registering anything
         check_option_collisions(
             plan_option_strings(
                 self,
@@ -127,9 +138,15 @@ class ArgumentRegistry:
                 getattr(parser, "add_help", True),
             )
         )
+        check_dest_collisions(self, flat_fields, base_config_name)
 
-        # Base config file argument
-        parser.add_argument(f"--{base_config_name}", type=str, help=base_config_help)
+        # Base config file argument (dest is what ConfigResolver reads back)
+        parser.add_argument(
+            f"--{base_config_name}",
+            type=str,
+            dest=base_config_name.replace("-", "_"),
+            help=escape_help(base_config_help),
+        )
 
         # Add positional arguments first, then optional arguments
         self._add_positional_arguments(parser, flat_fields)
@@ -153,7 +170,8 @@ class ArgumentRegistry:
                 info = mapping["nested_info"]
                 if is_cli_positional(info):
                     raise ConfigBuilderError(
-                        f"Positional arguments in nested dataclasses are not supported.\n"
+                        "Positional arguments in nested dataclasses are not "
+                        "supported.\n"
                         f"Field: {mapping_source(mapping)}\n"
                         f"Use regular fields or optional arguments instead."
                     )
@@ -183,7 +201,7 @@ class ArgumentRegistry:
     def _add_nested_optional_argument(
         self, parser: argparse.ArgumentParser, cli_name: str, mapping: Dict[str, Any]
     ) -> None:
-        """Add a nested (flattened) field as an optional argument with its prefixed name."""
+        """Add a nested (flattened) field as an optional argument with its prefix."""
         info = mapping["nested_info"]
         if is_cli_positional(info):
             return
@@ -195,7 +213,7 @@ class ArgumentRegistry:
     def _add_flat_optional_argument(
         self, parser: argparse.ArgumentParser, mapping: Dict[str, Any]
     ) -> None:
-        """Add a regular field as an optional argument (nested dataclasses are skipped)."""
+        """Add a regular field as an optional argument (skips nested dataclasses)."""
         info = mapping["field_info"]
         if is_cli_positional(info) or info.get("is_nested_dataclass", False):
             return
@@ -275,7 +293,7 @@ class ArgumentRegistry:
             Dictionary of kwargs for add_argument
         """
         kwargs: Dict[str, Any] = {
-            "help": help_text,
+            "help": escape_help(help_text),
             "metavar": metavar,
         }
 
@@ -314,13 +332,16 @@ class ArgumentRegistry:
             parser: ArgumentParser to add arguments to
             field_name: Field name (for boolean dest and default help text)
             info: Field info dict
-            cli_name: Pre-computed CLI name (for nested fields), uses info["cli_name"] if None
+            cli_name: Pre-computed CLI name (for nested fields), uses info["cli_name"]
+                if None
             prefix: Prefix for nested fields (empty string = no prefix)
             parent_field: Parent field name for nested fields (for help text context)
         """
         # Boolean fields handled separately
         if info["type"] == bool:
-            self._add_boolean_field(parser, field_name, info, cli_name)
+            self._add_boolean_field(
+                parser, field_name, info, cli_name, parent_field, prefix
+            )
             return
 
         # Non-boolean fields
@@ -334,6 +355,8 @@ class ArgumentRegistry:
         field_name: str,
         info: Dict[str, Any],
         cli_name: Optional[str],
+        parent_field: Optional[str] = None,
+        prefix: str = "",
     ) -> None:
         """
         Add boolean field argument.
@@ -343,13 +366,22 @@ class ArgumentRegistry:
             field_name: Field name
             info: Field info dict
             cli_name: Pre-computed CLI name for nested fields
+            parent_field: Dotted parent path for nested fields (for help text)
+            prefix: Composed prefix for nested fields (a non-empty prefix
+                disables the short option, as for every other field kind)
         """
         if cli_name:
-            # Nested boolean - update cli_name in info
-            field_name = cli_name.lstrip("-").replace("-", "_")
+            # Nested boolean - update cli_name in info; dest is the flat name
+            label = self._resolve_help_text({}, parent_field, field_name)
             nested_info = dict(info)
             nested_info["cli_name"] = cli_name
-            self.add_boolean_argument(parser, field_name, nested_info)
+            self.add_boolean_argument(
+                parser,
+                flattened_field_name(cli_name),
+                nested_info,
+                label,
+                allow_short=prefix == "",
+            )
         else:
             self.add_boolean_argument(parser, field_name, info)
 
@@ -410,20 +442,26 @@ class ArgumentRegistry:
             cli_name: CLI name for the field
             prefix: Prefix for nested fields
         """
+        dest = cli_name_to_dest(cli_name)
+
         # Handle append fields
         if is_cli_append(info):
             help_text = self.build_help_text(help_text, choices)
-            self.add_append_argument(parser, arg_names, info, help_text, choices)
+            self.add_append_argument(
+                parser, arg_names, info, help_text, choices, dest=dest
+            )
             return
 
         # Handle by type
         if info["is_list"]:
-            self.add_list_field(parser, arg_names, info, help_text, choices)
+            self.add_list_field(parser, arg_names, info, help_text, choices, dest=dest)
         elif info["is_dict"]:
             override_name = self._compute_dict_override_name(info, cli_name, prefix)
-            self.add_dict_field(parser, arg_names, help_text, override_name)
+            self.add_dict_field(parser, arg_names, help_text, override_name, dest=dest)
         else:
-            self.add_scalar_field(parser, arg_names, info, help_text, choices)
+            self.add_scalar_field(
+                parser, arg_names, info, help_text, choices, dest=dest
+            )
 
     def _resolve_cli_name_and_short(
         self, cli_name: Optional[str], info: Dict[str, Any], prefix: str
@@ -498,6 +536,7 @@ class ArgumentRegistry:
         info: Dict[str, Any],
         help_text: str,
         choices: Optional[List[Any]],
+        dest: Optional[str] = None,
     ) -> None:
         """
         Add append-action argument to parser.
@@ -510,6 +549,7 @@ class ArgumentRegistry:
             info: Field information dictionary
             help_text: Help text for the argument
             choices: Optional list of valid choices
+            dest: Namespace attribute (default: derived by argparse)
         """
         # Get append metadata
         append_nargs = get_cli_append_nargs(info)
@@ -534,6 +574,8 @@ class ArgumentRegistry:
             min_args,
             max_args,
         )
+        if dest is not None:
+            kwargs["dest"] = dest
 
         parser.add_argument(*arg_names, **kwargs)
 
@@ -585,14 +627,14 @@ class ArgumentRegistry:
             kwargs: Dict[str, Any] = {
                 "action": RangeAppendAction,
                 "type": arg_type,
-                "help": help_text
+                "help": escape_help(help_text)
                 + f" (can be repeated, {min_args}-{max_args} args each)",
             }
         else:
             kwargs = {
                 "action": "append",
                 "type": arg_type,
-                "help": help_text + " (can be repeated)",
+                "help": escape_help(help_text) + " (can be repeated)",
             }
 
         if append_nargs is not None:
@@ -609,21 +651,39 @@ class ArgumentRegistry:
         return kwargs
 
     def add_boolean_argument(
-        self, parser: argparse.ArgumentParser, field_name: str, info: Dict[str, Any]
+        self,
+        parser: argparse.ArgumentParser,
+        field_name: str,
+        info: Dict[str, Any],
+        label: Optional[str] = None,
+        allow_short: bool = True,
     ) -> None:
-        """Add boolean flag argument with positive and negative forms."""
+        """
+        Add boolean flag argument with positive and negative forms.
+
+        Args:
+            parser: ArgumentParser to add arguments to
+            field_name: Flattened field name (the negative flag is built from it)
+            info: Field info dict (its cli_name is the positive option)
+            label: Help text used when the field has no cli_help
+                (default: field_name)
+            allow_short: Register the field's cli_short letter (False for
+                nested fields under a non-empty prefix)
+        """
         cli_name = info["cli_name"]
-        dest_name = field_name.replace("-", "_")
+        dest_name = cli_name_to_dest(cli_name)
 
         # Get short option and build arg names
-        short_option = get_cli_short(info)
+        short_option = get_cli_short(info) if allow_short else None
         positive_args = self.build_arg_names(cli_name, short_option)
 
         # Get help text and default
         custom_help = get_cli_help(info)
-        help_text = custom_help if custom_help else field_name
+        help_text = custom_help if custom_help else (label or field_name)
         negative_help = f"Disable {cli_name}" if custom_help else f"Disable {help_text}"
-        default_value = info.get("default", False)
+        positive_help = help_text
+        if info.get("has_default", True):
+            positive_help += f" (default: {info.get('default', False)})"
 
         # Add positive form (--flag or -f)
         parser.add_argument(
@@ -631,17 +691,16 @@ class ArgumentRegistry:
             action="store_true",
             dest=dest_name,
             default=argparse.SUPPRESS,
-            help=f"{help_text} (default: {default_value})",
+            help=escape_help(positive_help),
         )
 
         # Add negative form (--no-flag)
-        negative_name = f"--no-{field_name.replace('_', '-')}"
         parser.add_argument(
-            negative_name,
+            negative_flag_name(field_name),
             action="store_false",
             dest=dest_name,
             default=argparse.SUPPRESS,
-            help=negative_help,
+            help=escape_help(negative_help),
         )
 
     def get_argument_type(self, field_type: Type) -> Callable[[str], Any]:
@@ -742,6 +801,7 @@ class ArgumentRegistry:
         info: Dict[str, Any],
         help_text: str,
         choices: Optional[List[Any]] = None,
+        dest: Optional[str] = None,
     ) -> None:
         """Add list field argument with appropriate nargs."""
         if info["is_optional"]:
@@ -761,12 +821,14 @@ class ArgumentRegistry:
             # default stays None: omitted means "not given", and argparse then
             # starts each extend from a fresh list (never a default or layer)
             kwargs["action"] = "extend"
+        if dest is not None:
+            kwargs["dest"] = dest
         parser.add_argument(
             *arg_names,
             nargs=nargs_val,
             type=self._list_element_converter(info),
             choices=choices,
-            help=final_help,
+            help=escape_help(final_help),
             **kwargs,
         )
 
@@ -776,6 +838,7 @@ class ArgumentRegistry:
         arg_names: List[str],
         help_text: str,
         override_name: str,
+        dest: Optional[str] = None,
     ) -> None:
         """Add dict field argument with file path and override support."""
         dict_help = (
@@ -783,7 +846,10 @@ class ArgumentRegistry:
             if help_text
             else "configuration file path"
         )
-        parser.add_argument(*arg_names, type=str, help=dict_help)
+        dest_kwargs: Dict[str, Any] = {} if dest is None else {"dest": dest}
+        parser.add_argument(
+            *arg_names, type=str, help=escape_help(dict_help), **dest_kwargs
+        )
 
         if override_name:
             override_help = (
@@ -791,7 +857,12 @@ class ArgumentRegistry:
                 if help_text
                 else "property override (format: key.path:value)"
             )
-            parser.add_argument(override_name, action="append", help=override_help)
+            parser.add_argument(
+                override_name,
+                action="append",
+                dest=cli_name_to_dest(override_name),
+                help=escape_help(override_help),
+            )
 
     def add_scalar_field(
         self,
@@ -800,8 +871,16 @@ class ArgumentRegistry:
         info: Dict[str, Any],
         help_text: str,
         choices: Optional[List[Any]] = None,
+        dest: Optional[str] = None,
     ) -> None:
         """Add scalar field argument."""
         arg_type = self.get_argument_type(info["type"])
         final_help = self.build_help_text(help_text, choices)
-        parser.add_argument(*arg_names, type=arg_type, choices=choices, help=final_help)
+        dest_kwargs: Dict[str, Any] = {} if dest is None else {"dest": dest}
+        parser.add_argument(
+            *arg_names,
+            type=arg_type,
+            choices=choices,
+            help=escape_help(final_help),
+            **dest_kwargs,
+        )

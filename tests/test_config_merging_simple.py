@@ -120,7 +120,9 @@ def test_cli_overrides_everything():
 
 def test_invalid_base_configs_type():
     """Should raise error for invalid base_configs type."""
-    with pytest.raises(ConfigurationError, match="must be str, dict, or list"):
+    with pytest.raises(
+        ConfigurationError, match="must be str, dict, ConfigLayer, or list"
+    ):
         build_config(SimpleConfig, args=["--name", "test"], base_configs=123)
 
 

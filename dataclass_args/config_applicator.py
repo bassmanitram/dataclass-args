@@ -201,7 +201,8 @@ class ConfigApplicator:
         - Mixed: "data.0.name" → target["data"][0]["name"]
 
         List indexing is determined by the runtime type of the container:
-        - If the container is a list and the key is a non-negative integer, index into it
+        - If the container is a list and the key is a non-negative integer, index into
+          it
         - If the container is a dict, the key is always a string key (even "0" or "+")
         - Missing intermediate keys always create dicts (never auto-create lists)
 
