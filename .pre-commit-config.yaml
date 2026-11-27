@@ -13,24 +13,24 @@ repos:
       - id: debug-statements
       - id: check-docstring-first
 
-  # Black code formatting
-  - repo: https://github.com/psf/black
-    rev: 26.1.0
+  # Formatters and linters run from the locked uv environment, so uv.lock is
+  # the single source of tool versions (black, isort, flake8)
+  - repo: local
     hooks:
       - id: black
-        language_version: python3
-
-  # isort import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
+        name: black
+        entry: uv run --frozen black
+        language: system
+        types: [python]
       - id: isort
+        name: isort
+        entry: uv run --frozen isort
+        language: system
+        types: [python]
         args: [--profile=black]
-
-  # flake8 linting
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
-    hooks:
       - id: flake8
+        name: flake8
+        entry: uv run --frozen flake8
+        language: system
+        types: [python]
         args: [--max-line-length=88, --max-cognitive-complexity=10]
-        additional_dependencies: [flake8-cognitive-complexity==0.1.0]

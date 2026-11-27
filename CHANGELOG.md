@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Development
+- **The project is now managed with [uv](https://docs.astral.sh/uv/).** There's no change to the library or the published package contents.
+  - Development tools moved from the `[dev]` extra to a `dev` dependency group (PEP 735), so the published package no longer advertises a `dev` extra.
+  - The committed `uv.lock` pins every tool version, and CI uses `uv sync --locked`.
+  - All workflows, the Makefile and the pre-commit hooks run through `uv`. black, isort and flake8 are now local hooks using the locked versions, so pre-commit and CI can no longer disagree.
+  - Packages are built with `uv build`. Publishing still uses PyPI trusted publishing.
+  - Dependabot now updates `uv.lock`.
+- New CI job that runs the test suite against the **lowest** declared versions of the optional runtime dependencies (PyYAML 6.0, pydantic 2.0).
+
 ## [1.10.1] - 2026-11-26
 
 This release also includes the fixes from an independent QA review of the whole project.

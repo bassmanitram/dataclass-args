@@ -13,40 +13,39 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Set up Python
-      uses: actions/setup-python@v7
+    - name: Set up uv with Python 3.12
+      uses: astral-sh/setup-uv@v7
       with:
+        enable-cache: true
         python-version: "3.12"
 
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev,all]"
+      run: uv sync --locked --all-extras
 
     - name: Run comprehensive tests
       run: |
-        pytest tests/ -v --cov=dataclass_args --cov-report=term-missing
+        uv run pytest tests/ -v --cov=dataclass_args --cov-report=term-missing
 
     - name: Check code quality
       run: |
-        black --check dataclass_args/ tests/ examples/
-        isort --check-only dataclass_args/ tests/ examples/
-        mypy --python-version 3.11 dataclass_args/
-        flake8 dataclass_args/
+        uv run black --check dataclass_args/ tests/ examples/
+        uv run isort --check-only dataclass_args/ tests/ examples/
+        uv run mypy --python-version 3.11 dataclass_args/
+        uv run flake8 dataclass_args/
 
     - name: Test examples
       run: |
         cd examples
-        python basic_example.py --name "StatusTest" --count 1
-        python advanced_example.py --name "StatusTest" --no-debug
+        uv run python basic_example.py --name "StatusTest" --count 1
+        uv run python advanced_example.py --name "StatusTest" --no-debug
 
     - name: Package health check
       run: |
-        pip install build twine
-        python -m build
-        twine check dist/*
-        pip install dist/*.whl
-        python -c "
+        uv build
+        uv run twine check dist/*
+        WHEEL=$(realpath dist/*.whl)
+        cd /tmp
+        uv run --no-project --isolated --with "$WHEEL" python -c "
         import dataclass_args
         print(f'Package version: {dataclass_args.__version__}')
         print('All imports successful')
@@ -60,12 +59,12 @@ jobs:
           echo ""
           echo "## Test Results"
         } > status-report.md
-        pytest tests/ --tb=no -q >> status-report.md 2>&1 || true
+        uv run pytest tests/ --tb=no -q >> status-report.md 2>&1 || true
         {
           echo ""
           echo "## Package Information"
         } >> status-report.md
-        python -c "
+        uv run python -c "
         import dataclass_args
         print(f'Version: {dataclass_args.__version__}')
         print(f'Available functions: {len([x for x in dir(dataclass_args) if not x.startswith(\"_\")])}')

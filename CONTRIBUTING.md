@@ -16,21 +16,21 @@ This project adheres to a standard code of conduct. By participating, you are ex
    cd dataclass-args
    ```
 
-2. **Create a virtual environment:**
+2. **Install [uv](https://docs.astral.sh/uv/getting-started/installation/)**, then create the environment and install everything, including the pre-commit hooks:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   make setup        # = uv sync --all-extras && uv run pre-commit install
+   ```
+   `uv sync` creates `.venv/` with the package (editable), every optional extra, and the `dev` dependency group, at the exact versions in `uv.lock`.
+
+3. **Verify the installation:**
+   ```bash
+   uv run python -c "from dataclass_args import build_config; print('✅ Installation successful!')"
    ```
 
-3. **Install development dependencies:**
-   ```bash
-   pip install -e ".[dev,all]"
-   ```
-
-4. **Verify installation:**
-   ```bash
-   python -c "from dataclass_args import build_config; print('✅ Installation successful!')"
-   ```
+**Dependencies:**
+- Add a runtime dependency or extra with `uv add [--optional <extra>] <pkg>`, and a development tool with `uv add --dev <pkg>`.
+- Commit the updated `uv.lock` with `pyproject.toml`. CI runs `uv sync --locked`, so it fails if the lock is out of date.
+- `pip install -e .` still works for the package itself. The dev tools are only in the `dev` dependency group (pip 25.1+: `pip install --group dev`).
 
 ### Development Workflow
 
@@ -43,19 +43,19 @@ This project adheres to a standard code of conduct. By participating, you are ex
 
 3. **Run tests:**
    ```bash
-   pytest
-   pytest --cov=dataclass_args  # With coverage
+   make test                     # uv run pytest (coverage is automatic)
+   uv run --isolated --all-extras --python 3.11 pytest   # oldest supported Python, without touching .venv
    ```
 
-4. **Format code:**
+4. **Format and lint:**
    ```bash
-   black dataclass_args/ tests/ examples/
-   isort dataclass_args/ tests/ examples/
+   make format                   # black + isort
+   make lint                     # black --check, isort --check-only, mypy, flake8
    ```
 
-5. **Type checking:**
+5. **Everything CI checks (lint, tests, examples):**
    ```bash
-   mypy dataclass_args/
+   make check
    ```
 
 6. **Commit and push:**
@@ -72,26 +72,19 @@ This project adheres to a standard code of conduct. By participating, you are ex
 ### Code Style
 
 - **Python Version**: Support all non-EOL Python versions (currently 3.11+; tested on 3.11–3.14)
-- **Formatting**: Use Black with line length 88
-- **Import Sorting**: Use isort with Black profile
+- **Formatting**: Black, line length 88 (versions pinned in `uv.lock`)
+- **Import Sorting**: isort with the Black profile
+- **Linting**: flake8 per `.flake8`; cognitive complexity ≤ 10 per function (enforced in CI)
 - **Type Hints**: Use type hints for all public APIs
 - **Docstrings**: Use Google-style docstrings
 
 ### Code Structure
 
-```
-dataclass_args/
-├── __init__.py          # Main exports
-├── annotations.py       # Field annotations
-├── builder.py          # Core GenericConfigBuilder
-├── exceptions.py       # Custom exceptions
-├── file_loading.py     # File loading utilities
-└── utils.py           # Helper functions
-```
+See the module map in [AGENT_BOOTSTRAP.md](AGENT_BOOTSTRAP.md#codebase-organization): one module per pipeline stage (field analysis, argument registration, layer normalisation, merging, CLI overrides, nested reconstruction, value resolution, provenance), with the public entry points in `convenience.py` and the annotations in `annotations.py`.
 
 ### Testing
 
-- **Coverage**: Maintain >90% test coverage
+- **Coverage**: Keep branch coverage at its current level (about 98%). CI fails below 88%
 - **Test Structure**: Use pytest with clear test names
 - **Test Categories**: Unit tests for all modules
 - **Edge Cases**: Test error conditions and edge cases
@@ -99,18 +92,17 @@ dataclass_args/
 #### Running Tests
 
 ```bash
-# Run all tests
-pytest
+# Run all tests (with coverage)
+uv run pytest
 
-# Run with coverage
-pytest --cov=dataclass_args --cov-report=html
+# HTML coverage report
+make coverage-html
 
 # Run specific test files
-pytest tests/test_basic.py
-pytest tests/test_file_loading.py
+uv run pytest tests/test_cli_short.py tests/test_file_loading.py
 
-# Run tests matching pattern
-pytest -k "test_file_loading"
+# Run tests matching a pattern
+uv run pytest -k "file_loading"
 ```
 
 ### Documentation
@@ -233,7 +225,7 @@ We follow [Semantic Versioning](https://semver.org/):
 
 1. In the release PR, set the new version in **both** `pyproject.toml` (`version = "X.Y.Z"`) and `dataclass_args/__init__.py` (`__version__ = "X.Y.Z"`).
 2. Add a `## [X.Y.Z] - YYYY-MM-DD` entry to `CHANGELOG.md`.
-3. Make sure the full test suite and the docs are up to date.
+3. Make sure `make check` passes and the docs are up to date.
 4. Merge the PR into `main`. Any merge style works: merge commit, squash or rebase.
 
 Tagging and publishing are **automatic**. There's no manual tag step.

@@ -1939,18 +1939,19 @@ Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) 
 
 ### Development Setup
 
+The project is managed with [uv](https://docs.astral.sh/uv/). Development dependencies live in the `dev` dependency group, and exact versions are pinned in the committed `uv.lock`.
+
 ```bash
 git clone https://github.com/bassmanitram/dataclass-args.git
 cd dataclass-args
-pip install -e ".[dev,all]"
-make setup  # Install dev dependencies and pre-commit hooks
+make setup   # uv sync --all-extras + install pre-commit hooks
 ```
 
 ### Running Tests
 
 ```bash
 # Run all tests (coverage is automatic)
-pytest
+uv run pytest
 make test
 
 # Run tests with detailed coverage report
@@ -1959,11 +1960,12 @@ make coverage
 # Run tests with coverage and open HTML report
 make coverage-html
 
-# Run specific test file
-pytest tests/test_cli_short.py
+# Run a specific test file
+uv run pytest tests/test_cli_short.py
 
-# Verbose output
-pytest -v
+# Run against another Python version, in a throwaway environment
+# (without --isolated, uv would rebuild .venv for that version)
+uv run --isolated --all-extras --python 3.13 pytest
 ```
 
 ### Code Coverage
@@ -1980,16 +1982,13 @@ All code changes should maintain or improve coverage. CI fails below 88%.
 
 ```bash
 # Format code
-make format
-black dataclass_args/ tests/ examples/
-isort dataclass_args/ tests/ examples/
+make format          # uv run black + uv run isort
 
-# Check formatting
-make lint
-black --check dataclass_args/ tests/
-flake8 dataclass_args/
-mypy dataclass_args/
+# Check formatting, lint and types
+make lint            # black --check, isort --check-only, mypy, flake8 (all via uv run)
 ```
+
+The pre-commit hooks run the same locked tool versions, through `uv run`, so local checks, pre-commit and CI always agree.
 
 ### Full Check (like CI)
 

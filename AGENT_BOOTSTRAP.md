@@ -3,6 +3,7 @@
 **Purpose**: Zero-boilerplate CLI generation from Python dataclasses with advanced type support
 **Type**: Library
 **Language**: Python 3.11+ (non-EOL versions only; tested on 3.11–3.14; no runtime dependencies)
+**Tooling**: [uv](https://docs.astral.sh/uv/). `uv sync --all-extras` sets up everything, `uv run <tool>` runs it, and `uv.lock` pins every dev tool (CI uses `--locked`). The build backend is setuptools (`uv build`).
 **Repository**: https://github.com/bassmanitram/dataclass-args
 
 ---

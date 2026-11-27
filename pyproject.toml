@@ -41,18 +41,6 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
-    "flake8>=6.0.0",
-    "flake8-cognitive-complexity>=0.1.0",
-    "bandit>=1.7.0",
-    "types-PyYAML>=6.0.0",
-]
 yaml = [
     "PyYAML>=6.0",
 ]
@@ -69,6 +57,26 @@ Homepage = "https://github.com/bassmanitram/dataclass-args"
 Repository = "https://github.com/bassmanitram/dataclass-args"
 Documentation = "https://github.com/bassmanitram/dataclass-args#readme"
 Issues = "https://github.com/bassmanitram/dataclass-args/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "flake8>=6.0.0",
+    "flake8-cognitive-complexity>=0.1.0",
+    "bandit>=1.7.0",
+    "types-PyYAML>=6.0.0",
+    "twine>=5.0.0",
+    "actionlint-py>=1.7.0",
+    "pip-audit>=2.7.0",
+]
+
+[tool.uv]
+required-version = ">=0.10"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -13,26 +13,26 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Set up Python
-      uses: actions/setup-python@v7
+    - name: Set up uv with Python 3.12
+      uses: astral-sh/setup-uv@v7
       with:
+        enable-cache: true
         python-version: "3.12"
 
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev,all]"
+      run: uv sync --locked --all-extras
 
     - name: Check for security vulnerabilities
       run: |
-        pip install safety
-        safety check || true
+        uv run pip-audit || true
 
     - name: Check for outdated dependencies
       run: |
-        pip list --outdated
+        uv pip list --outdated
 
+    # The upgraded lock is only used for this run; it is never committed.
     - name: Test with latest dependencies
       run: |
-        pip install --upgrade --upgrade-strategy eager -e ".[dev,all]"
-        pytest tests/ -v
+        uv lock --upgrade
+        uv sync --all-extras
+        uv run pytest tests/ -v
